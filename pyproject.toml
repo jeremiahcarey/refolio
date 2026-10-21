@@ -10,7 +10,7 @@ readme = "README.md"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
 requires-python = ">=3.10"
-authors = [{ name = "Refolio contributors" }]
+authors = [{ name = "Jeremiah Carey" }]
 keywords = ["pdf", "epub", "text-to-speech", "footnotes", "academic", "accessibility"]
 classifiers = [
   "Development Status :: 3 - Alpha",
