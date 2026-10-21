@@ -86,7 +86,8 @@ async function showHome() {
   for (const it of items) {
     const li = document.createElement("li");
     const when = new Date(it.updated * 1000).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
-    li.innerHTML = `<a href="#/doc/${it.id}">${escapeHtml((it.name || "Untitled").replace(/\.pdf$/i, ""))}</a>
+    li.innerHTML = `<input type="checkbox" class="pick" aria-label="Select ${escapeHtml(it.name || "")}">
+      <a href="#/doc/${it.id}">${escapeHtml((it.name || "Untitled").replace(/\.pdf$/i, ""))}</a>
       <span class="when">${when}</span>
       <button type="button" class="ghost del" aria-label="Delete ${escapeHtml(it.name || "")}">Delete</button>`;
     li.querySelector(".del").onclick = async () => {
@@ -94,11 +95,45 @@ async function showHome() {
       await api(`/api/projects/${it.id}`, { method: "DELETE" });
       li.remove();
       $("#recent-wrap").hidden = !ul.children.length;
+      updatePicks();
     };
+    li.querySelector(".pick").onchange = updatePicks;
+    li.dataset.id = it.id;
+    li.dataset.name = it.name || "Untitled";
     ul.appendChild(li);
   }
   $("#recent-wrap").hidden = !items.length;
+  updatePicks();
 }
+
+function updatePicks() {
+  const boxes = [...document.querySelectorAll("#recent .pick")];
+  const n = boxes.filter((b) => b.checked).length;
+  const all = $("#pick-all");
+  all.hidden = !boxes.length;
+  all.checked = n > 0 && n === boxes.length;
+  all.indeterminate = n > 0 && n < boxes.length;
+  const btn = $("#delete-picked");
+  btn.hidden = !n;
+  btn.textContent = `Delete selected (${n})`;
+}
+
+$("#pick-all").onchange = (e) => {
+  document.querySelectorAll("#recent .pick").forEach((b) => (b.checked = e.target.checked));
+  updatePicks();
+};
+
+$("#delete-picked").onclick = async () => {
+  const rows = [...document.querySelectorAll("#recent li")].filter((li) => li.querySelector(".pick").checked);
+  if (!rows.length) return;
+  if (!confirm(`Delete ${rows.length} document${rows.length === 1 ? "" : "s"} from Refolio? Exported EPUBs aren't affected.`)) return;
+  for (const li of rows) {
+    await api(`/api/projects/${li.dataset.id}`, { method: "DELETE" });
+    li.remove();
+  }
+  $("#recent-wrap").hidden = !$("#recent").children.length;
+  updatePicks();
+};
 
 function selectedEngine(name) {
   const el = document.querySelector(`input[name="${name}"]:checked`);

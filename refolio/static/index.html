@@ -34,7 +34,14 @@
   </section>
 
   <section class="recent" id="recent-wrap" hidden>
-    <h2>Recent documents</h2>
+    <div class="recent-head">
+      <input type="checkbox" id="pick-all" aria-label="Select all documents" hidden>
+      <h2>Recent documents
+        <span class="hint" tabindex="0" role="note"
+              title="These are Refolio's working copies: the uploaded PDF, converted text and your edits. Deleting one removes only that copy. Your original PDF and any exported EPUBs are untouched.">ⓘ</span>
+      </h2>
+      <button type="button" class="ghost" id="delete-picked" hidden>Delete selected</button>
+    </div>
     <ul id="recent"></ul>
   </section>
 </main>
