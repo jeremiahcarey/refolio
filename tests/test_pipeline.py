@@ -232,7 +232,7 @@ def test_web_app_roundtrip(tmp_path, monkeypatch):
     from refolio.server import create_app
     import time
 
-    c = TestClient(create_app())
+    c = TestClient(create_app(), base_url="http://127.0.0.1:8765")
     assert c.get("/").status_code == 200
     info = c.get("/api/info").json()
     assert {e["id"] for e in info["engines"]} == {"builtin", "marker"}
@@ -253,6 +253,21 @@ def test_web_app_roundtrip(tmp_path, monkeypatch):
     assert r.content[:2] == b"PK"
     assert c.post("/api/projects", files={"file": ("x.pdf", b"not a pdf", "application/pdf")}).status_code == 400
     assert c.get("/api/projects").json()[0]["id"] == pid
+
+
+def test_server_refuses_foreign_hosts_and_origins(tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    from fastapi.testclient import TestClient
+    from refolio.server import create_app
+
+    c = TestClient(create_app(), base_url="http://127.0.0.1:8765")
+    assert c.get("/api/info").status_code == 200
+    assert c.get("/api/info", headers={"Origin": "http://127.0.0.1:8765"}).status_code == 200
+    assert c.get("/api/info", headers={"Host": "localhost:8765"}).status_code == 200
+    assert c.get("/api/info", headers={"Host": "evil.example:8765"}).status_code == 403  # DNS rebinding
+    r = c.delete("/api/projects/abcdef123456", headers={"Origin": "https://evil.example"})
+    assert r.status_code == 403
+    assert c.post("/api/projects", headers={"Origin": "http://localhost:9999"}).status_code == 403
 
 
 # --- text-matrix scaled PDFs (Word export: pdftext reports every font size as 1.0) ---

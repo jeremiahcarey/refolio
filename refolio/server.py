@@ -13,8 +13,9 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor
 from io import BytesIO
 from pathlib import Path
+from urllib.parse import urlsplit
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -113,8 +114,23 @@ class ExportBody(BaseModel):
     author: str | None = None
 
 
+LOCAL_HOSTS = {"127.0.0.1", "localhost", "[::1]"}
+
+
 def create_app() -> FastAPI:
     app = FastAPI(title="Refolio", version=__version__)
+
+    @app.middleware("http")
+    async def local_requests_only(request: Request, call_next):
+        # A web page open in the same browser can send requests to 127.0.0.1. The Host
+        # check stops DNS rebinding; the Origin check stops cross-site commands.
+        host = request.headers.get("host", "")
+        if host.rsplit(":", 1)[0] not in LOCAL_HOSTS and host not in LOCAL_HOSTS:
+            return JSONResponse({"detail": "Unexpected host."}, status_code=403)
+        origin = request.headers.get("origin")
+        if origin is not None and urlsplit(origin).netloc != host:
+            return JSONResponse({"detail": "Cross-site request refused."}, status_code=403)
+        return await call_next(request)
 
     @app.get("/")
     def index():
