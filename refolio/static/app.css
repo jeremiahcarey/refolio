@@ -115,6 +115,15 @@ legend { font-weight: 600; font-size: 13.5px; margin-bottom: 10px; color: var(--
 .recent { margin-top: 48px; }
 .recent h2 { font: 600 15px var(--sans); color: var(--graphite); margin: 0; flex: 1; }
 .recent .hint { margin-left: 4px; font-weight: 400; cursor: help; color: var(--graphite); }
+.recent-head h2 { position: relative; }
+.tip { position: relative; }
+.tip::after {
+  content: attr(data-tip); position: absolute; left: 0; top: 100%; margin-top: 6px; z-index: 10;
+  width: 300px; padding: 9px 11px; border-radius: 6px; font: 400 13px/1.4 var(--sans);
+  background: var(--ink); color: var(--sheet); box-shadow: 0 4px 14px rgba(0,0,0,.2);
+  opacity: 0; visibility: hidden; transition: opacity .12s; pointer-events: none;
+}
+.tip:hover::after, .tip:focus::after { opacity: 1; visibility: visible; }
 .recent-head { display: flex; align-items: center; gap: 12px; margin: 0 0 8px; min-height: 34px; }
 .recent-head #delete-picked { font-size: 13px; }
 .recent .pick, .recent-head #pick-all { margin: 0 0 0 2px; accent-color: var(--accent); }
