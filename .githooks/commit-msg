@@ -1,0 +1,6 @@
+#!/bin/sh
+
+if grep -Eiq '^co-authored-by:.*(claude|anthropic|copilot)' "$1"; then
+    printf '%s\n' "Commit rejected: Claude and Copilot co-author trailers are disabled in this repository."
+    exit 1
+fi
