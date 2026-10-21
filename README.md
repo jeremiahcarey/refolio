@@ -1,6 +1,6 @@
 # Refolio
 
-Refolio turns PDFs of papers into clean EPUBs for listening in text-to-speech apps such as ElevenReader.
+Refolio turns PDFs of papers or books into clean EPUBs for listening in text-to-speech apps such as ElevenReader, VoiceDream, Speechify, etc.
 
 PDF-to-EPUB tools are built for reading on a screen, and most of what goes wrong with them goes wrong loudly when the text is read aloud:
 
@@ -10,7 +10,7 @@ PDF-to-EPUB tools are built for reading on a screen, and most of what goes wrong
 
 Refolio fixes these, then shows you the text next to the original pages so you can give it a quick once-over before exporting.
 
-It was written for philosophy and humanities papers: mostly text, sometimes two columns, lots of footnotes. It doesn't try to handle heavy math, tables or figures.
+It was written mainly for philosophy and humanities papers: mostly text, sometimes two columns, lots of footnotes. It doesn't try to handle heavy math, tables or figures (which are not ideal for listening anyway).
 
 ## What it does
 
@@ -23,18 +23,20 @@ It was written for philosophy and humanities papers: mostly text, sometimes two 
 2. **Lets you review it** side by side with the original page. One-click tools fix the usual leftovers, and a notice bar points out anything that needs a look, such as a footnote number that didn't match a note.
 3. **Exports an EPUB 3** with your choice of footnote handling:
 
-   | Option | What you hear |
-   |---|---|
+   | Option                    | What you hear                                                                                   |
+   | ------------------------- | ----------------------------------------------------------------------------------------------- |
    | Notes at the end (linked) | The text straight through, then the notes. Reference numbers link to the notes in reading apps. |
-   | Read after each paragraph | Each note right after the paragraph that cites it. |
-   | Read where cited | Each note in parentheses at the point it's cited. |
-   | Leave notes out | Just the text. |
+   | Read after each paragraph | Each note right after the paragraph that cites it.                                              |
+   | Read where cited          | Each note in parentheses at the point it's cited.                                               |
+   | Leave notes out           | Just the text.                                                                                  |
 
    The "Listening order" tab shows exactly what will be read with each option.
 
 Everything runs on your computer. Nothing is uploaded.
 
-## Install and run on a Mac
+![Refolio's review screen: the editable text on the left, the original PDF page on the right](docs/screenshot.png)
+
+## Install and run on a Mac (instructions for other platforms coming soon)
 
 **Easiest:** download this folder and double-click **`Refolio.command`**.
 
@@ -55,12 +57,12 @@ Refolio also runs on Windows and Linux the same way (`uv tool install …`, then
 
 ## Two converters
 
-| | Fast (built-in) | Accurate (Marker) |
-|---|---|---|
-| How it works | Reads the PDF's own text layer and works out the layout | Uses [Marker](https://github.com/datalab-to/marker)'s layout-detection models |
-| Good for | Born-digital papers: Word exports, LaTeX, most journal PDFs | Unusual layouts, scans, anything the fast converter gets wrong |
-| Speed | A second or two per paper | Slower; the first run downloads its models |
-| Install | Included | Double-click **`Refolio with Marker.command`** instead, or `uv tool install "refolio[marker] @ git+…"`. This adds PyTorch, several GB. |
+|              | Fast (built-in)                                             | Accurate (Marker)                                                                                                                      |
+| ------------ | ----------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| How it works | Reads the PDF's own text layer and works out the layout     | Uses [Marker](https://github.com/datalab-to/marker)'s layout-detection models                                                          |
+| Good for     | Born-digital papers: Word exports, LaTeX, most journal PDFs | Unusual layouts, scans, anything the fast converter gets wrong                                                                         |
+| Speed        | A second or two per paper                                   | Slower; the first run downloads its models                                                                                             |
+| Install      | Included                                                    | Double-click **`Refolio with Marker.command`** instead, or `uv tool install "refolio[marker] @ git+…"`. This adds PyTorch, several GB. |
 
 Try the fast converter first. If a paper comes out badly, choose **Convert again** and switch to Marker.
 
@@ -99,15 +101,15 @@ When we accept what another person tells us …ourselves.[^1] This familiar fact
 
 ### Cleanup tools
 
-| Tool | What it does |
-|---|---|
-| Fix › Split paragraphs | Rejoins a paragraph broken by a page or column break: the first part ends mid-sentence and the next starts in lower case |
-| Fix › Hyphenation | Rejoins words split across lines ("philo- sophy"), keeping real compounds ("self-evident") |
-| Remove › Page numbers | Deletes lines that are only a page number |
-| Remove › Repeated lines | Deletes short lines that occur three or more times, such as a running head that slipped through |
-| Remove › Stray superscripts | Deletes superscripts that didn't match any footnote |
-| Remove › Citations | Deletes author-year citations like "(Smith 1990, 23)", which are tedious to listen to |
-| Remove › Web addresses | Deletes URLs and DOIs |
+| Tool                        | What it does                                                                                                             |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| Fix › Split paragraphs      | Rejoins a paragraph broken by a page or column break: the first part ends mid-sentence and the next starts in lower case |
+| Fix › Hyphenation           | Rejoins words split across lines ("philo- sophy"), keeping real compounds ("self-evident")                               |
+| Remove › Page numbers       | Deletes lines that are only a page number                                                                                |
+| Remove › Repeated lines     | Deletes short lines that occur three or more times, such as a running head that slipped through                          |
+| Remove › Stray superscripts | Deletes superscripts that didn't match any footnote                                                                      |
+| Remove › Citations          | Deletes author-year citations like "(Smith 1990, 23)", which are tedious to listen to                                    |
+| Remove › Web addresses      | Deletes URLs and DOIs                                                                                                    |
 
 Every tool can be undone with ⌘Z. **Find and replace** (⌘F) supports regular expressions for anything else.
 
@@ -137,14 +139,14 @@ uv run refolio
 
 How it fits together:
 
-| File | Role |
-|---|---|
-| `refolio/backends/builtin.py` | Text-layer converter: header/footer removal, XY-cut reading order, footnote, heading and quote detection |
-| `refolio/backends/marker_backend.py` | Maps Marker's JSON blocks onto the same model |
-| `refolio/assemble.py` | Links footnote marks to notes, merges split paragraphs, writes the Markdown |
-| `refolio/epub.py` | Markdown → EPUB 3 in the four footnote modes |
-| `refolio/cleanup.py` | The cleanup tools |
-| `refolio/server.py`, `refolio/static/` | The local web app (FastAPI and plain JavaScript, no build step) |
+| File                                   | Role                                                                                                     |
+| -------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| `refolio/backends/builtin.py`          | Text-layer converter: header/footer removal, XY-cut reading order, footnote, heading and quote detection |
+| `refolio/backends/marker_backend.py`   | Maps Marker's JSON blocks onto the same model                                                            |
+| `refolio/assemble.py`                  | Links footnote marks to notes, merges split paragraphs, writes the Markdown                              |
+| `refolio/epub.py`                      | Markdown → EPUB 3 in the four footnote modes                                                             |
+| `refolio/cleanup.py`                   | The cleanup tools                                                                                        |
+| `refolio/server.py`, `refolio/static/` | The local web app (FastAPI and plain JavaScript, no build step)                                          |
 
 Bug reports are most useful with the PDF attached, or at least a screenshot of the page that went wrong.
 
