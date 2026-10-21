@@ -14,7 +14,7 @@ import re
 from html.parser import HTMLParser
 
 from ..model import Block, Extracted
-from ..textutil import escape_block_start, escape_inline, normalize_spaces
+from ..textutil import escape_block_start, escape_inline, normalize_spaces, supify
 
 _models = None
 
@@ -93,7 +93,7 @@ def html_to_inline(html: str) -> str:
     p.feed(html or "")
     text = "".join(p.out)
     text = re.sub(r"\*\*\*\*|(?<![*\w])\*\*(?![*\w])", "", text)  # empty emphasis
-    return normalize_spaces(htmllib.unescape(text))
+    return supify(normalize_spaces(htmllib.unescape(text)))
 
 
 _KIND = {

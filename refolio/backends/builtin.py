@@ -19,7 +19,8 @@ from dataclasses import dataclass, field
 
 from ..model import Block, Extracted
 from ..textutil import (vocab, escape_block_start, escape_inline, ends_sentence,
-                        is_note_mark, join_hyphenated, normalize_spaces)
+                        is_note_mark, join_hyphenated, normalize_spaces,
+                        SUP_DIGITS_RE, SUPERSCRIPT_DIGITS, unicode_sup_to_digits)
 
 MARGIN_ZONE = 0.09  # top/bottom fraction of the page treated as header/footer zone
 
@@ -106,12 +107,13 @@ def _bogus_size_runs(span, line_med, italic, bold) -> list[Run]:
             return
         hs = [h for h in (_char_h(c) for c in cur) if h > 0]
         size = statistics.median(hs) if hs else line_med
-        runs.append(Run("".join(c["char"] for c in cur).replace("\n", "").replace("\r", ""),
-                        size, italic, bold, cur_sup))
+        text = "".join(c["char"] for c in cur).replace("\n", "").replace("\r", "")
+        runs.append(Run(unicode_sup_to_digits(text) if cur_sup else text, size, italic, bold, cur_sup))
 
     for c in span["chars"]:
         h = _char_h(c)
-        small = bool(line_med) and 0 < h < 0.8 * line_med and c["char"] in MARK_CHARS
+        small = (bool(line_med) and 0 < h < 0.8 * line_med and c["char"] in MARK_CHARS) \
+            or c["char"] in SUPERSCRIPT_DIGITS
         if cur and h > 0 and small != cur_sup:
             flush()
             cur = []
@@ -120,6 +122,19 @@ def _bogus_size_runs(span, line_med, italic, bold) -> list[Run]:
         cur.append(c)
     flush()
     return [r for r in runs if r.text]
+
+
+def _split_unicode_sups(text, size, italic, bold) -> list[Run]:
+    """Note marks set as Unicode superscript digits become real superscript runs."""
+    runs, pos = [], 0
+    for m in SUP_DIGITS_RE.finditer(text):
+        if m.start() > pos:
+            runs.append(Run(text[pos:m.start()], size, italic, bold))
+        runs.append(Run(unicode_sup_to_digits(m.group(0)), size, italic, bold, True))
+        pos = m.end()
+    if pos < len(text):
+        runs.append(Run(text[pos:], size, italic, bold))
+    return runs
 
 
 def _line_size(l: Line) -> float:
@@ -221,6 +236,9 @@ def _read_pages(pdf_path):
                         continue
                     sup = bool(s.get("superscript")) or (
                         main and size < 0.8 * main and is_note_mark(text))
+                    if not sup and SUP_DIGITS_RE.search(text):
+                        runs.extend(_split_unicode_sups(text, size, italic, bold))
+                        continue
                     runs.append(Run(text, size, italic, bold, sup))
                 if runs and "".join(r.text for r in runs).strip():
                     lines.append(Line(runs, tuple(l["bbox"])))
@@ -363,6 +381,9 @@ def _split_paragraphs(b: TBlock) -> list[list[Line]]:
 # ---------------------------------------------------------------------------
 # main entry point
 
+PLAIN_LEAD_RE = re.compile(r"^\s*\d{1,3}[.)]?\s+\S")
+
+
 def _starts_with_mark(b: TBlock) -> bool:
     first = next((r for r in b.lines[0].runs if r.text.strip()), None)
     return first is not None and first.sup and is_note_mark(first.text)
@@ -372,6 +393,11 @@ def _find_footnotes(live, bodyish, body, h):
     """Footnotes are the stack of blocks at the bottom of each column that are in
     smaller print than the body text or begin with a note mark."""
     found = set()
+    # small print on a page with no note marks at all (copyright page, bibliography)
+    # is not a footnote stack
+    if not any(_starts_with_mark(b) or PLAIN_LEAD_RE.match(b.lines[0].plain)
+               for b in live if b.size <= body * 0.93 or _starts_with_mark(b)):
+        return found
     for b in live:
         small = b.size <= body * 0.93
         marked = _starts_with_mark(b)

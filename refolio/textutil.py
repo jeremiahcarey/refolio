@@ -17,6 +17,22 @@ SUP_RE = re.compile(r"<sup>(.*?)</sup>", re.S)
 NOTE_MARK_RE = re.compile(r"^\s*(\d{1,3}|[*†‡§¶‖#]+)\s*$")
 
 
+# Some PDFs (OUP, Cambridge and others) set note marks as Unicode superscript digits
+# ("peers.⁴", "¹⁰ Beeley (2008)") instead of using a raised, smaller font.
+SUPERSCRIPT_DIGITS = "⁰¹²³⁴⁵⁶⁷⁸⁹"
+_SUP_TO_ASCII = str.maketrans(SUPERSCRIPT_DIGITS, "0123456789")
+SUP_DIGITS_RE = re.compile(f"[{SUPERSCRIPT_DIGITS}]+")
+
+
+def unicode_sup_to_digits(s: str) -> str:
+    return s.translate(_SUP_TO_ASCII)
+
+
+def supify(text: str) -> str:
+    """Turn runs of Unicode superscript digits into <sup>12</sup> reference marks."""
+    return SUP_DIGITS_RE.sub(lambda m: f"<sup>{unicode_sup_to_digits(m.group(0))}</sup>", text)
+
+
 def is_note_mark(s: str) -> bool:
     s = re.sub(r"<[^>]+>", "", s)
     return bool(NOTE_MARK_RE.match(s.strip()))
