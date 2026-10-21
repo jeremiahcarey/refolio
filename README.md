@@ -8,7 +8,7 @@ PDF-to-EPUB tools are built for reading on a screen, and most of what goes wrong
 - running heads and page numbers are read on every page,
 - footnotes land in the middle of sentences.
 
-Refolio fixes these, then shows you the text next to the original pages so you can give it a quick once-over before exporting.
+Refolio fixes these, then shows you the text next to the original pages so you can give it a quick once-over and edit or remove whatever you want before exporting.
 
 It was written mainly for philosophy and humanities papers: mostly text, sometimes two columns, lots of footnotes. It doesn't try to handle heavy math, tables or figures (which are not ideal for listening anyway).
 
