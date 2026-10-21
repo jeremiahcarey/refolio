@@ -14,7 +14,7 @@ const state = {
 
 const ENGINE_DESC = {
   builtin: "Reads the PDF's own text. Quick, and good for most born-digital papers.",
-  marker: "Uses layout models. Slower, but handles scans and unusual layouts.",
+  marker: "Uses specially trained ai models. Slower, but handles scans and unusual layouts.",
 };
 const MODE_DESC = {
   endnotes: "Notes are collected after the text. Reference numbers link to them.",
