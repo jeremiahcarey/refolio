@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Earmark</title>
+<link rel="icon" href="/static/icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+
+<!-- Home: upload and recent documents -->
+<main id="home" class="screen home" hidden>
+  <header class="home-head">
+    <div class="wordmark"><span class="glyph" aria-hidden="true"></span>Earmark</div>
+    <p class="lede">Turn a PDF of a paper into an EPUB that reads aloud cleanly: columns in order, running heads gone, footnotes where you want them.</p>
+  </header>
+
+  <section class="sheet" id="drop" tabindex="0" aria-label="Choose a PDF to convert">
+    <div class="sheet-body" id="drop-idle">
+      <h1>Drop a PDF here</h1>
+      <p>or <button type="button" class="linklike" id="choose">choose a file</button></p>
+      <input type="file" id="file" accept="application/pdf,.pdf" hidden>
+      <fieldset class="engines" id="engines">
+        <legend>Converter</legend>
+      </fieldset>
+    </div>
+    <div class="sheet-body" id="drop-busy" hidden>
+      <h1 id="busy-name">Converting</h1>
+      <div class="bar" role="progressbar" aria-valuemin="0" aria-valuemax="100"><span id="bar-fill"></span></div>
+      <p id="busy-msg" class="muted">Starting</p>
+    </div>
+    <p class="sheet-error" id="drop-error" role="alert" hidden></p>
+  </section>
+
+  <section class="recent" id="recent-wrap" hidden>
+    <h2>Recent documents</h2>
+    <ul id="recent"></ul>
+  </section>
+</main>
+
+<!-- Review: edit next to the original -->
+<div id="review" class="screen review" hidden>
+  <header class="topbar">
+    <button type="button" class="ghost" id="back" title="All documents"><span class="glyph small" aria-hidden="true"></span><span class="hide-narrow">Earmark</span></button>
+    <div class="docname"><span id="docname"></span><span id="savestate" class="muted"></span></div>
+    <div class="top-actions">
+      <button type="button" class="ghost" id="reconvert-btn">Convert again<span class="hide-narrow">…</span></button>
+      <button type="button" class="primary" id="export-btn">Export EPUB</button>
+    </div>
+  </header>
+
+  <nav class="toolbar" aria-label="Cleanup">
+    <div id="tools" class="tools"></div>
+    <button type="button" class="tool" id="find-btn" aria-expanded="false">Find and replace</button>
+  </nav>
+
+  <form class="findbar" id="findbar" hidden>
+    <input id="find" placeholder="Find" aria-label="Find" autocomplete="off">
+    <input id="replace" placeholder="Replace with" aria-label="Replace with" autocomplete="off">
+    <label class="check"><input type="checkbox" id="regex"> Pattern (regex)</label>
+    <button type="button" class="tool" id="find-next">Find next</button>
+    <button type="submit" class="tool strong">Replace all</button>
+    <span id="find-msg" class="muted"></span>
+  </form>
+
+  <div class="panes">
+    <section class="pane editor-pane" aria-label="Text">
+      <div class="pane-head">
+        <span>Text</span>
+        <span class="muted hint">Edit freely. <code>[^3]</code> marks a footnote; the page lines keep the original in step.</span>
+      </div>
+      <textarea id="editor" spellcheck="false" aria-label="Document text"></textarea>
+    </section>
+
+    <section class="pane side-pane" aria-label="Original and preview">
+      <div class="pane-head tabs" role="tablist">
+        <button type="button" role="tab" id="tab-page" aria-selected="true">Original</button>
+        <button type="button" role="tab" id="tab-preview" aria-selected="false">Listening order</button>
+        <span class="spacer"></span>
+        <span class="pager" id="pager">
+          <button type="button" class="ghost icon" id="prev" aria-label="Previous page">‹</button>
+          <span><span id="pageno">1</span> <span class="muted">of <span id="pagecount">1</span></span></span>
+          <button type="button" class="ghost icon" id="next" aria-label="Next page">›</button>
+          <label class="check small"><input type="checkbox" id="follow" checked> Follow text</label>
+        </span>
+      </div>
+      <div class="pageview" id="pageview" role="tabpanel" aria-labelledby="tab-page">
+        <img id="pageimg" alt="Original PDF page">
+      </div>
+      <div class="preview" id="preview" role="tabpanel" aria-labelledby="tab-preview" hidden>
+        <p class="preview-note muted">This is the text in the order it will be read, with footnotes handled as <select id="preview-mode" aria-label="Footnote handling"></select>.</p>
+        <article id="preview-body"></article>
+      </div>
+    </section>
+  </div>
+
+  <footer class="notices" id="notices" hidden>
+    <ul id="notice-list"></ul>
+  </footer>
+</div>
+
+<!-- Export dialog -->
+<dialog id="export-dlg" aria-labelledby="export-title">
+  <form method="dialog" id="export-form">
+    <h2 id="export-title">Export EPUB</h2>
+    <label class="field">Title<input id="ex-title" required></label>
+    <label class="field">Author<input id="ex-author"></label>
+    <fieldset class="modes" id="modes"><legend>Footnotes</legend></fieldset>
+    <p class="muted small" id="ex-msg" role="status"></p>
+    <div class="dlg-actions">
+      <button type="button" class="ghost" value="cancel" id="ex-cancel">Cancel</button>
+      <button type="submit" class="primary" id="ex-go">Export EPUB</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- Convert again dialog -->
+<dialog id="reconvert-dlg" aria-labelledby="re-title">
+  <form method="dialog" id="re-form">
+    <h2 id="re-title">Convert again</h2>
+    <p>This replaces the current text, including your edits.</p>
+    <fieldset class="engines" id="re-engines"><legend>Converter</legend></fieldset>
+    <div class="dlg-actions">
+      <button type="button" class="ghost" id="re-cancel">Cancel</button>
+      <button type="submit" class="primary">Convert again</button>
+    </div>
+  </form>
+</dialog>
+
+<div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

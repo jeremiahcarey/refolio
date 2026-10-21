@@ -1,0 +1,49 @@
+[build-system]
+requires = ["hatchling>=1.24"]
+build-backend = "hatchling.build"
+
+[project]
+name = "earmark"
+version = "0.1.0"
+description = "Turn PDFs of papers into clean EPUBs for listening: columns in order, running heads gone, footnotes where you want them."
+readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+requires-python = ">=3.10"
+authors = [{ name = "Earmark contributors" }]
+keywords = ["pdf", "epub", "text-to-speech", "footnotes", "academic", "accessibility"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Environment :: Web Environment",
+  "Intended Audience :: Education",
+  "Intended Audience :: Science/Research",
+  "Operating System :: MacOS",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Topic :: Text Processing :: Markup",
+]
+dependencies = [
+  "pdftext>=0.7,<0.8",
+  "pypdfium2>=4.30",
+  "markdown-it-py>=3.0",
+  "fastapi>=0.110",
+  "uvicorn>=0.29",
+  "python-multipart>=0.0.9",
+  "pillow>=10",
+]
+
+[project.optional-dependencies]
+marker = ["marker-pdf>=2.0"]
+dev = ["pytest>=8", "httpx>=0.27", "epubcheck>=5"]
+
+[project.scripts]
+earmark = "earmark.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/YOUR-USERNAME/earmark"
+
+[tool.hatch.build.targets.wheel]
+packages = ["earmark"]
+
+[tool.hatch.build.targets.sdist]
+exclude = ["tests/fixtures/*.pdf"]
