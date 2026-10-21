@@ -1,4 +1,4 @@
-"""Earmark Markdown -> EPUB 3.
+"""Refolio Markdown -> EPUB 3.
 
 Footnotes can be handled four ways, chosen at export time:
 
@@ -348,7 +348,7 @@ def build_epub(md: str, mode: str = "endnotes", title: str | None = None,
     {f'<dc:creator>{esc(author)}</dc:creator>' if author else ''}
     <dc:language>{esc(lang)}</dc:language>
     <meta property="dcterms:modified">{modified}</meta>
-    <meta name="generator" content="Earmark"/>
+    <meta name="generator" content="Refolio"/>
   </metadata>
   <manifest>
     {chr(10).join('    ' + m for m in manifest).strip()}

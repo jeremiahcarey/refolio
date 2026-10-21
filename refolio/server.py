@@ -30,9 +30,13 @@ _jobs: dict[str, dict] = {}
 
 
 def data_dir() -> Path:
-    d = Path.home() / "Library" / "Application Support" / "Earmark"
+    d = Path.home() / "Library" / "Application Support" / "Refolio"
+    old = Path.home() / "Library" / "Application Support" / "Earmark"  # the app's former name
     if not (Path.home() / "Library").exists():  # not macOS
-        d = Path.home() / ".earmark"
+        d = Path.home() / ".refolio"
+        old = Path.home() / ".earmark"
+    if old.exists() and not d.exists():
+        old.rename(d)
     (d / "projects").mkdir(parents=True, exist_ok=True)
     return d
 
@@ -110,7 +114,7 @@ class ExportBody(BaseModel):
 
 
 def create_app() -> FastAPI:
-    app = FastAPI(title="Earmark", version=__version__)
+    app = FastAPI(title="Refolio", version=__version__)
 
     @app.get("/")
     def index():
@@ -256,7 +260,7 @@ def create_app() -> FastAPI:
         from urllib.parse import quote
         return Response(r.data, media_type="application/epub+zip", headers={
             "Content-Disposition": f"attachment; filename=\"{name}.epub\"; filename*=UTF-8''{quote(name)}.epub",
-            "X-Earmark-Warnings": quote(json.dumps(r.warnings)),
+            "X-Refolio-Warnings": quote(json.dumps(r.warnings)),
         })
 
     @app.exception_handler(Exception)

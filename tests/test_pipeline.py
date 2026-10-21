@@ -8,12 +8,12 @@ from types import SimpleNamespace
 
 import pytest
 
-from earmark import cleanup
-from earmark.assemble import assemble
-from earmark.backends import builtin, marker_backend
-from earmark.convert import convert
-from earmark.epub import FOOTNOTE_MODES, build_epub, parse
-from earmark.model import Block, Extracted
+from refolio import cleanup
+from refolio.assemble import assemble
+from refolio.backends import builtin, marker_backend
+from refolio.convert import convert
+from refolio.epub import FOOTNOTE_MODES, build_epub, parse
+from refolio.model import Block, Extracted
 
 FIX = Path(__file__).parent / "fixtures"
 TWO_COL = FIX / "two_column_journal.pdf"
@@ -229,7 +229,7 @@ def test_marker_json_mapping():
 def test_web_app_roundtrip(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))
     from fastapi.testclient import TestClient
-    from earmark.server import create_app
+    from refolio.server import create_app
     import time
 
     c = TestClient(create_app())
@@ -253,3 +253,50 @@ def test_web_app_roundtrip(tmp_path, monkeypatch):
     assert r.content[:2] == b"PK"
     assert c.post("/api/projects", files={"file": ("x.pdf", b"not a pdf", "application/pdf")}).status_code == 400
     assert c.get("/api/projects").json()[0]["id"] == pid
+
+
+# --- text-matrix scaled PDFs (Word export: pdftext reports every font size as 1.0) ---
+
+def _chars(text, h, x=0.0):
+    out = []
+    for ch in text:
+        out.append({"char": ch, "bbox": [x, 100.0, x + 5, 100.0 + h]})
+        x += 5
+    return out
+
+
+def test_bogus_font_size_uses_char_heights_for_superscripts():
+    span = {"text": "civilization.”1 One", "chars": _chars("civilization.”", 13.3) + _chars("1", 8.8)
+            + _chars(" One", 13.3)}
+    runs = builtin._bogus_size_runs(span, 13.3, False, False)
+    assert [(r.text, r.sup) for r in runs] == [("civilization.”", False), ("1", True), (" One", False)]
+    assert runs[0].size == pytest.approx(13.3) and runs[1].size == pytest.approx(8.8)
+
+
+def test_block_split_where_print_size_drops_and_fused_notes_separate():
+    R, L = builtin.Run, builtin.Line
+    body = L([R("A body line of text.", 13.3)], (90, 600, 525, 613))
+    note = L([R("7", 7.2, sup=True), R(" Apuleius, XI, 5. ", 11.2), R("8", 7.2, sup=True),
+              R(" Tuzuk-i-Jahangiri", 11.2)], (90, 697, 482, 720))
+    tb = builtin.TBlock([body, note], (90, 600, 525, 720), 13)
+    parts = builtin._split_by_size(tb)
+    assert [len(p.lines) for p in parts] == [1, 1]
+    lines = builtin._split_at_note_marks(note)
+    assert [l.plain.strip() for l in lines] == ["7 Apuleius, XI, 5.", "8 Tuzuk-i-Jahangiri"]
+
+
+def test_plain_digit_marks_and_fused_notes_link():
+    # what Marker returns for a Word export: marks lose their superscript, notes fuse
+    blocks = [
+        Block("para", 'our own civilization."1 One cannot ask. Then more text."2 Done.', 8),
+        Block("footnote", "<sup> 1</sup> Ruth Benedict, *Patterns*, p. 5.", 8),
+        Block("footnote", "<sup>2</sup> Apuleius, XI, 5. <sup>3</sup> Tuzuk, p. 356.", 8),
+    ]
+    a = assemble(Extracted(blocks, 8))
+    assert a.stats["notes"] == 3 and a.stats["linked"] == 2 and a.stats["unmatched_refs"] == 0
+    assert 'civilization."[^1] One' in a.markdown and 'more text."[^2] Done' in a.markdown
+    assert "[^3]: Tuzuk, p. 356." in a.markdown
+    # a year or ordinary number is never taken for a mark
+    b2 = [Block("para", "It was 1934. See chapter 1 and p. 5.", 3),
+          Block("footnote", "<sup>1</sup> A note.", 3)]
+    assert assemble(Extracted(b2, 3)).stats["linked"] == 0

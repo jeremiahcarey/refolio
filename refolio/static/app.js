@@ -1,4 +1,4 @@
-/* Earmark front end. Plain JS, no build step, works offline. */
+/* Refolio front end. Plain JS, no build step, works offline. */
 "use strict";
 
 const $ = (s) => document.querySelector(s);
@@ -9,7 +9,7 @@ const state = {
   markers: [],        // [{page, pos, y}]
   saveTimer: null,
   previewTimer: null,
-  mode: localStorage.getItem("earmark.mode") || "endnotes",
+  mode: localStorage.getItem("refolio.mode") || "endnotes",
 };
 
 const ENGINE_DESC = {
@@ -64,7 +64,7 @@ function engineChoices(container, name, selected) {
     const label = document.createElement("label");
     if (!e.available) label.classList.add("off");
     const desc = e.available ? ENGINE_DESC[e.id] :
-      'Not installed. To add it, run <code>pip install "earmark[marker]"</code> and restart Earmark.';
+      'Not installed. To add it, run <code>pip install "refolio[marker]"</code> and restart Refolio.';
     label.innerHTML = `<input type="radio" name="${name}" value="${e.id}" ${e.available ? "" : "disabled"}
       ${e.id === selected ? "checked" : ""}><span>${escapeHtml(e.label)}</span><span class="desc">${desc}</span>`;
     container.appendChild(label);
@@ -77,8 +77,8 @@ async function showHome() {
   $("#drop-idle").hidden = false;
   $("#drop-busy").hidden = true;
   $("#drop-error").hidden = true;
-  document.title = "Earmark";
-  const saved = localStorage.getItem("earmark.engine") || "builtin";
+  document.title = "Refolio";
+  const saved = localStorage.getItem("refolio.engine") || "builtin";
   engineChoices($("#engines"), "engine", saved);
   const items = await api("/api/projects").then((r) => r.json());
   const ul = $("#recent");
@@ -90,7 +90,7 @@ async function showHome() {
       <span class="when">${when}</span>
       <button type="button" class="ghost del" aria-label="Delete ${escapeHtml(it.name || "")}">Delete</button>`;
     li.querySelector(".del").onclick = async () => {
-      if (!confirm(`Delete “${it.name}” from Earmark? Exported EPUBs aren't affected.`)) return;
+      if (!confirm(`Delete “${it.name}” from Refolio? Exported EPUBs aren't affected.`)) return;
       await api(`/api/projects/${it.id}`, { method: "DELETE" });
       li.remove();
       $("#recent-wrap").hidden = !ul.children.length;
@@ -112,7 +112,7 @@ async function upload(file) {
     return;
   }
   const engine = selectedEngine("engine");
-  localStorage.setItem("earmark.engine", engine);
+  localStorage.setItem("refolio.engine", engine);
   const fd = new FormData();
   fd.append("file", file);
   fd.append("engine", engine);
@@ -190,7 +190,7 @@ async function openDoc(id) {
   $("#review").hidden = false;
   const name = d.title || (d.name || "Untitled").replace(/\.pdf$/i, "");
   $("#docname").textContent = name;
-  document.title = `${name} · Earmark`;
+  document.title = `${name} · Refolio`;
   $("#pagecount").textContent = d.pages || 1;
   $("#savestate").textContent = "";
   setEditorValue(d.markdown, false);
@@ -334,7 +334,7 @@ async function refreshPreview() {
 }
 $("#preview-mode").onchange = (e) => {
   state.mode = e.target.value;
-  localStorage.setItem("earmark.mode", state.mode);
+  localStorage.setItem("refolio.mode", state.mode);
   refreshPreview();
 };
 
@@ -524,7 +524,7 @@ $("#export-form").onsubmit = async (e) => {
   e.preventDefault();
   const mode = document.querySelector('input[name="mode"]:checked')?.value || "endnotes";
   state.mode = mode;
-  localStorage.setItem("earmark.mode", mode);
+  localStorage.setItem("refolio.mode", mode);
   const title = $("#ex-title").value.trim();
   const author = $("#ex-author").value.trim();
   // keep the edited title/author in the document itself
@@ -548,7 +548,7 @@ $("#export-form").onsubmit = async (e) => {
     document.body.appendChild(a);
     a.click();
     setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 2000);
-    const warns = JSON.parse(decodeURIComponent(res.headers.get("X-Earmark-Warnings") || "%5B%5D"));
+    const warns = JSON.parse(decodeURIComponent(res.headers.get("X-Refolio-Warnings") || "%5B%5D"));
     $("#export-dlg").close();
     toast(`Exported “${name}”.` + (warns.length ? " " + warns[0] : ""));
   } catch (err) {

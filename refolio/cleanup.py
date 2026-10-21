@@ -1,4 +1,4 @@
-"""One-click cleanup operations on Earmark Markdown.
+"""One-click cleanup operations on Refolio Markdown.
 
 Each operation takes the whole document and returns (new_document, count_of_changes).
 They never touch the front matter, and only the ones that say so touch footnotes.

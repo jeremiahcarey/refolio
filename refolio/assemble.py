@@ -38,11 +38,15 @@ def _split_marks(s: str) -> list[str]:
     return [p for p in re.split(r"[,\s]+", s.strip()) if p]
 
 
+# a second note's mark fused onto the end of the previous note's block
+FUSED_NOTE_RE = re.compile(r"(?<=[.)”\"'’])\s+(?=<sup>\s*\d{1,3}\s*</sup>)")
+
+
 def _collect_notes(blocks: list[Block]) -> list[Note]:
     notes: list[Note] = []
-    for b in blocks:
-        if b.kind != "footnote":
-            continue
+    pieces = [Block(b.kind, t, b.page, b.level, b.bbox)
+              for b in blocks if b.kind == "footnote" for t in FUSED_NOTE_RE.split(b.text)]
+    for b in pieces:
         m = LEAD_MARK_RE.match(b.text)
         mark = None
         if m:
@@ -73,6 +77,44 @@ def _find_note(notes: list[Note], mark: str, page: int) -> Note | None:
     return cands[0]
 
 
+def _plain_mark_re(mark: str) -> re.Pattern:
+    # "civilization.”1 One", "wake”3—for": digits glued to the word or punctuation before
+    return re.compile(rf"(?<=[A-Za-z.,;:!?”’\"')\]])(?<!\d){re.escape(mark)}(?!\d)(?=[\s—–]|$)")
+
+
+def _promote_plain_marks(notes: list[Note], body: list[Block]) -> int:
+    """Some converters lose the superscript formatting, leaving a note mark as plain
+    digits stuck to the end of a sentence. For each numbered note with no <sup>
+    reference nearby, turn the first such plain number on its page into one."""
+    promoted = 0
+    cursor = 0
+    for n in notes:
+        if not n.mark or not n.mark.isdigit():
+            continue
+        pages = (n.page, n.page - 1)
+        sup = re.compile(rf"<sup>\s*{n.mark}\s*</sup>")
+        if any(b.page in pages and sup.search(b.text) for b in body if b.kind != "heading"):
+            continue
+        rx = _plain_mark_re(n.mark)
+        for page in pages:
+            hit = None
+            for i in range(cursor if page == n.page else 0, len(body)):
+                b = body[i]
+                if b.page != page or b.kind == "heading":
+                    continue
+                m = rx.search(b.text)
+                if m:
+                    hit = (i, m)
+                    break
+            if hit:
+                i, m = hit
+                body[i].text = body[i].text[:m.start()] + f"<sup>{n.mark}</sup>" + body[i].text[m.end():]
+                cursor = i
+                promoted += 1
+                break
+    return promoted
+
+
 def assemble(ex: Extracted) -> Assembled:
     warnings = list(ex.warnings)
     notes = _collect_notes(ex.blocks)
@@ -87,6 +129,12 @@ def assemble(ex: Extracted) -> Assembled:
             prev.text = join_hyphenated(prev.text, b.text)
             continue
         merged.append(Block(b.kind, b.text, b.page, b.level, b.bbox))
+
+    promoted = _promote_plain_marks(notes, merged)
+    if promoted:
+        warnings.append(
+            f"{promoted} note mark(s) had lost their superscript formatting in the PDF text and "
+            "were matched to their notes by number and position; worth a quick check.")
 
     # link reference marks to notes
     counter = 0

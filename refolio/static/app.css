@@ -1,4 +1,4 @@
-/* Earmark — a reading-room palette: slate ink on cool paper, teal ink for actions,
+/* Refolio — a reading-room palette: slate ink on cool paper, teal ink for actions,
    highlighter yellow only where something needs a look. */
 :root {
   --ink: #1E2733;
@@ -46,7 +46,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .small { font-size: 13px; }
 code { font: 12.5px var(--mono); }
 
-/* the fold: Earmark's one recurring mark */
+/* the fold: Refolio's one recurring mark */
 .glyph {
   display: inline-block; width: 22px; height: 28px; margin-right: 10px; vertical-align: -5px;
   background: var(--ink); clip-path: polygon(0 0, 62% 0, 100% 30%, 100% 100%, 0 100%); position: relative;

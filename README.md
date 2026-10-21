@@ -1,6 +1,6 @@
-# Earmark
+# Refolio
 
-Earmark turns PDFs of papers into clean EPUBs for listening in text-to-speech apps such as ElevenReader.
+Refolio turns PDFs of papers into clean EPUBs for listening in text-to-speech apps such as ElevenReader.
 
 PDF-to-EPUB tools are built for reading on a screen, and most of what goes wrong with them goes wrong loudly when the text is read aloud:
 
@@ -8,7 +8,7 @@ PDF-to-EPUB tools are built for reading on a screen, and most of what goes wrong
 - running heads and page numbers are read on every page,
 - footnotes land in the middle of sentences.
 
-Earmark fixes these, then shows you the text next to the original pages so you can give it a quick once-over before exporting.
+Refolio fixes these, then shows you the text next to the original pages so you can give it a quick once-over before exporting.
 
 It was written for philosophy and humanities papers: mostly text, sometimes two columns, lots of footnotes. It doesn't try to handle heavy math, tables or figures.
 
@@ -36,22 +36,22 @@ Everything runs on your computer. Nothing is uploaded.
 
 ## Install and run on a Mac
 
-**Easiest:** download this folder and double-click **`Earmark.command`**.
+**Easiest:** download this folder and double-click **`Refolio.command`**.
 
 - The first time, macOS may say it can't verify the developer. If so, right-click the file, choose **Open**, then **Open** again. You only have to do this once.
 - The first run spends a minute or two installing what it needs: [uv](https://docs.astral.sh/uv/), which brings its own Python.
-- After that, Earmark opens in your browser.
+- After that, Refolio opens in your browser.
 - Keep the Terminal window open while you use it. Close it to quit.
 
 **From the Terminal**, if you prefer:
 
 ```sh
 curl -LsSf https://astral.sh/uv/install.sh | sh                      # once, if you don't have uv
-uv tool install --python 3.12 git+https://github.com/YOUR-USERNAME/earmark
-earmark
+uv tool install --python 3.12 git+https://github.com/jeremiahcarey/refolio
+refolio
 ```
 
-Earmark also runs on Windows and Linux the same way (`uv tool install …`, then `earmark`), though it has mainly been designed for macOS.
+Refolio also runs on Windows and Linux the same way (`uv tool install …`, then `refolio`), though it has mainly been designed for macOS.
 
 ## Two converters
 
@@ -60,13 +60,13 @@ Earmark also runs on Windows and Linux the same way (`uv tool install …`, then
 | How it works | Reads the PDF's own text layer and works out the layout | Uses [Marker](https://github.com/datalab-to/marker)'s layout-detection models |
 | Good for | Born-digital papers: Word exports, LaTeX, most journal PDFs | Unusual layouts, scans, anything the fast converter gets wrong |
 | Speed | A second or two per paper | Slower; the first run downloads its models |
-| Install | Included | Double-click **`Earmark with Marker.command`** instead, or `uv tool install "earmark[marker] @ git+…"`. This adds PyTorch, several GB. |
+| Install | Included | Double-click **`Refolio with Marker.command`** instead, or `uv tool install "refolio[marker] @ git+…"`. This adds PyTorch, several GB. |
 
 Try the fast converter first. If a paper comes out badly, choose **Convert again** and switch to Marker.
 
 Some notes on Marker:
 
-- **Scanned PDFs:** on a Mac, Marker's OCR runs through llama.cpp. Install [Homebrew](https://brew.sh) and run `brew install llama.cpp`. Without it, Earmark still uses Marker but turns OCR off and tells you so.
+- **Scanned PDFs:** on a Mac, Marker's OCR runs through llama.cpp. Install [Homebrew](https://brew.sh) and run `brew install llama.cpp`. Without it, Refolio still uses Marker but turns OCR off and tells you so.
 - **Licensing:** Marker's code is Apache-2.0. Its model weights are free for research, personal use and organizations under $5M in funding or revenue. See [Marker's README](https://github.com/datalab-to/marker#commercial-usage) for commercial terms.
 
 ## Reviewing and editing
@@ -95,7 +95,7 @@ When we accept what another person tells us …ourselves.[^1] This familiar fact
 - `[^1]` marks a footnote reference, and `[^1]: …` is the note itself. To link a stray number by hand, replace `<sup>4</sup>` with `[^4]` and make sure a `[^4]: …` line exists.
 - The `<!-- page N -->` lines keep the original page view in step with where you are in the text. They aren't included in the EPUB.
 - `*italic*`, `**bold**`, `#` headings and `>` quotations work as in any Markdown.
-- Edits save automatically. Your documents are kept in `~/Library/Application Support/Earmark` (on other systems, `~/.earmark`).
+- Edits save automatically. Your documents are kept in `~/Library/Application Support/Refolio` (on other systems, `~/.refolio`).
 
 ### Cleanup tools
 
@@ -114,19 +114,19 @@ Every tool can be undone with ⌘Z. **Find and replace** (⌘F) supports regular
 ## Command line
 
 ```sh
-earmark convert paper.pdf                      # writes paper.epub (notes at the end)
-earmark convert paper.pdf --notes after_paragraph
-earmark convert paper.pdf --markdown           # writes paper.md to edit by hand
-earmark build paper.md --notes inline          # EPUB from an edited Markdown file
-earmark convert scan.pdf --engine marker
+refolio convert paper.pdf                      # writes paper.epub (notes at the end)
+refolio convert paper.pdf --notes after_paragraph
+refolio convert paper.pdf --markdown           # writes paper.md to edit by hand
+refolio build paper.md --notes inline          # EPUB from an edited Markdown file
+refolio convert scan.pdf --engine marker
 ```
 
 ## Development
 
 ```sh
-git clone https://github.com/YOUR-USERNAME/earmark && cd earmark
+git clone https://github.com/jeremiahcarey/refolio && cd refolio
 uv run --python 3.12 --extra dev pytest
-uv run earmark
+uv run refolio
 ```
 
 - `tests/fixtures/make_fixtures.py` regenerates the test PDFs. It needs `pdflatex`, `pandoc` and LibreOffice. The PDFs are original filler text in three layouts:
@@ -139,12 +139,12 @@ How it fits together:
 
 | File | Role |
 |---|---|
-| `earmark/backends/builtin.py` | Text-layer converter: header/footer removal, XY-cut reading order, footnote, heading and quote detection |
-| `earmark/backends/marker_backend.py` | Maps Marker's JSON blocks onto the same model |
-| `earmark/assemble.py` | Links footnote marks to notes, merges split paragraphs, writes the Markdown |
-| `earmark/epub.py` | Markdown → EPUB 3 in the four footnote modes |
-| `earmark/cleanup.py` | The cleanup tools |
-| `earmark/server.py`, `earmark/static/` | The local web app (FastAPI and plain JavaScript, no build step) |
+| `refolio/backends/builtin.py` | Text-layer converter: header/footer removal, XY-cut reading order, footnote, heading and quote detection |
+| `refolio/backends/marker_backend.py` | Maps Marker's JSON blocks onto the same model |
+| `refolio/assemble.py` | Links footnote marks to notes, merges split paragraphs, writes the Markdown |
+| `refolio/epub.py` | Markdown → EPUB 3 in the four footnote modes |
+| `refolio/cleanup.py` | The cleanup tools |
+| `refolio/server.py`, `refolio/static/` | The local web app (FastAPI and plain JavaScript, no build step) |
 
 Bug reports are most useful with the PDF attached, or at least a screenshot of the page that went wrong.
 

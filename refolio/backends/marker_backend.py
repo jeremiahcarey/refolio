@@ -2,7 +2,7 @@
 
 Marker runs layout-detection models, so it copes with messier PDFs than the
 built-in converter: unusual layouts, scanned pages (OCR), tables. It is optional:
-install with ``pip install "earmark[marker]"``. The first run downloads its models.
+install with ``pip install "refolio[marker]"``. The first run downloads its models.
 
 Marker's code is Apache-2.0. Its model weights are free for research, personal use
 and small organisations; see Marker's README for the commercial terms.

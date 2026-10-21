@@ -1,4 +1,4 @@
-"""Generate test PDFs that look like the papers Earmark is meant for.
+"""Generate test PDFs that look like the papers Refolio is meant for.
 
 Run:  python tests/fixtures/make_fixtures.py
 Needs pdflatex (two-column journal style) and pandoc + LibreOffice (Word style).

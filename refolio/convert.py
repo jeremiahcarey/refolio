@@ -33,7 +33,7 @@ def convert(pdf_path: str | Path, engine: str = "builtin", allow_ocr: bool = Tru
     if engine == "marker":
         if not marker_backend.available():
             raise RuntimeError(
-                "Marker isn't installed. Install it with:  pip install \"earmark[marker]\"")
+                "Marker isn't installed. Install it with:  pip install \"refolio[marker]\"")
         ex = marker_backend.extract(pdf_path, allow_ocr=allow_ocr, progress=progress)
     else:
         ex = builtin.extract(pdf_path, progress=progress)

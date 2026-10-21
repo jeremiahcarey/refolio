@@ -83,10 +83,94 @@ def _span_style(span) -> tuple[bool, bool]:
     return italic, bold
 
 
+MARK_CHARS = set("0123456789*†‡§¶,")
+
+
+def _char_h(c) -> float:
+    b = c["bbox"]
+    return b[3] - b[1]
+
+
+def _bogus_size_runs(span, line_med, italic, bold) -> list[Run]:
+    """Some producers (Word's PDF export, for one) scale text through the text matrix
+    and leave the font size at 1.0, so pdftext can't tell body text from small print or
+    superscripts, and glues a note mark onto the word before it. The character boxes
+    still carry the real geometry: use their heights as the size, and treat small
+    digits and symbols as superscripts."""
+    runs: list[Run] = []
+    cur: list = []
+    cur_sup = False
+
+    def flush():
+        if not cur:
+            return
+        hs = [h for h in (_char_h(c) for c in cur) if h > 0]
+        size = statistics.median(hs) if hs else line_med
+        runs.append(Run("".join(c["char"] for c in cur).replace("\n", "").replace("\r", ""),
+                        size, italic, bold, cur_sup))
+
+    for c in span["chars"]:
+        h = _char_h(c)
+        small = bool(line_med) and 0 < h < 0.8 * line_med and c["char"] in MARK_CHARS
+        if cur and h > 0 and small != cur_sup:
+            flush()
+            cur = []
+        if h > 0:
+            cur_sup = small
+        cur.append(c)
+    flush()
+    return [r for r in runs if r.text]
+
+
+def _line_size(l: Line) -> float:
+    sizes = [r.size for r in l.runs if not r.sup and r.text.strip()]
+    return max(sizes) if sizes else 0.0
+
+
+def _split_at_note_marks(l: Line) -> list[Line]:
+    """pdftext sometimes fuses two short footnotes into one line ("7 Apuleius, XI, 5.
+    8 Tuzuk..."). Start a new line at a note mark that follows a finished sentence."""
+    out: list[Line] = []
+    cur: list[Run] = []
+    for r in l.runs:
+        prev = "".join(x.text for x in cur).strip()
+        if r.sup and is_note_mark(r.text) and prev and ends_sentence(prev):
+            out.append(Line(cur, l.bbox))
+            cur = []
+        cur.append(r)
+    out.append(Line(cur, l.bbox))
+    return out
+
+
+def _split_by_size(tb: TBlock) -> list[TBlock]:
+    """pdftext can put the last paragraph of a page and its footnotes in one block.
+    Split wherever the print size changes by more than ~8%."""
+    if len(tb.lines) < 2:
+        return [tb]
+    sizes = [_line_size(l) for l in tb.lines]
+    # a line that is only a note mark takes the size of the line after it
+    for i in range(len(sizes) - 1, -1, -1):
+        if not sizes[i]:
+            sizes[i] = sizes[i + 1] if i + 1 < len(sizes) else sizes[i - 1] if i else 0.0
+    groups: list[list[Line]] = [[tb.lines[0]]]
+    for prev, cur, l in zip(sizes, sizes[1:], tb.lines[1:]):
+        if prev and cur and abs(prev - cur) > 0.08 * max(prev, cur):
+            groups.append([])
+        groups[-1].append(l)
+    if len(groups) == 1:
+        return [tb]
+    out = []
+    for g in groups:
+        bb = (min(l.bbox[0] for l in g), min(l.bbox[1] for l in g),
+              max(l.bbox[2] for l in g), max(l.bbox[3] for l in g))
+        out.append(TBlock(g, bb, tb.page))
+    return out
+
+
 def _read_pages(pdf_path):
     from pdftext.extraction import dictionary_output
 
-    pages = dictionary_output(str(pdf_path), keep_chars=False, disable_links=True)
+    pages = dictionary_output(str(pdf_path), keep_chars=True, disable_links=True)
     out = []
     for pi, page in enumerate(pages):
         blocks = []
@@ -96,12 +180,18 @@ def _read_pages(pdf_path):
                 runs = []
                 sizes = [s["font"].get("size") or 0 for s in l["spans"] if s["text"].strip()]
                 main = max(sizes) if sizes else 0
+                heights = [h for s in l["spans"] for c in s.get("chars") or ()
+                           if (h := _char_h(c)) > 0]
+                line_med = statistics.median(heights) if heights else 0
                 for s in l["spans"]:
                     text = s["text"].replace("\n", "")
                     if not text:
                         continue
                     size = s["font"].get("size") or main
                     italic, bold = _span_style(s)
+                    if size < 3 and s.get("chars"):
+                        runs.extend(_bogus_size_runs(s, line_med, italic, bold))
+                        continue
                     sup = bool(s.get("superscript")) or (
                         main and size < 0.8 * main and is_note_mark(text))
                     runs.append(Run(text, size, italic, bold, sup))
@@ -116,7 +206,7 @@ def _read_pages(pdf_path):
                     for r in ln.runs:
                         if not r.sup and bsize and r.size < 0.8 * bsize and is_note_mark(r.text):
                             r.sup = True
-                blocks.append(tb)
+                blocks.extend(_split_by_size(tb))
         out.append((page["width"], page["height"], blocks))
     return out
 
@@ -420,7 +510,7 @@ def extract(pdf_path, progress=None) -> Extracted:
         for b in notes:
             # a block may hold several notes: start a new one at each leading mark
             cur: list[Line] = []
-            for l in b.lines:
+            for l in (x for ln in b.lines for x in _split_at_note_marks(ln)):
                 first = next((r for r in l.runs if r.text.strip()), None)
                 starts = first is not None and (
                     (first.sup and is_note_mark(first.text))

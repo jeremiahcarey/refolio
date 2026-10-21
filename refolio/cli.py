@@ -1,7 +1,7 @@
 """Command line entry point.
 
-    earmark                      open the app in your browser
-    earmark convert paper.pdf    convert without the app (writes paper.epub)
+    refolio                      open the app in your browser
+    refolio convert paper.pdf    convert without the app (writes paper.epub)
 """
 from __future__ import annotations
 
@@ -31,7 +31,7 @@ def serve(port: int = 8765, open_browser: bool = True):
 
     port = _free_port(port)
     url = f"http://127.0.0.1:{port}/"
-    print(f"Earmark is running at {url}\nLeave this window open while you use it; press Ctrl+C to quit.")
+    print(f"Refolio is running at {url}\nLeave this window open while you use it; press Ctrl+C to quit.")
     if open_browser:
         threading.Timer(1.0, lambda: webbrowser.open(url)).start()
     uvicorn.run(create_app(), host="127.0.0.1", port=port, log_level="warning")
@@ -73,7 +73,7 @@ def build_cmd(args):
 def main(argv=None):
     from .epub import FOOTNOTE_MODES
 
-    ap = argparse.ArgumentParser(prog="earmark", description="Turn PDFs of papers into EPUBs for listening.")
+    ap = argparse.ArgumentParser(prog="refolio", description="Turn PDFs of papers into EPUBs for listening.")
     ap.add_argument("--port", type=int, default=8765)
     ap.add_argument("--no-browser", action="store_true", help="don't open a browser window")
     sub = ap.add_subparsers(dest="cmd")
@@ -87,7 +87,7 @@ def main(argv=None):
     c.add_argument("--markdown", action="store_true", help="write the editable Markdown instead")
     c.add_argument("--no-ocr", action="store_true", help="Marker only: never OCR")
 
-    b = sub.add_parser("build", help="build an EPUB from an edited Earmark Markdown file")
+    b = sub.add_parser("build", help="build an EPUB from an edited Refolio Markdown file")
     b.add_argument("markdown")
     b.add_argument("-o", "--output")
     b.add_argument("--notes", choices=list(FOOTNOTE_MODES), default="endnotes")
