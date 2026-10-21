@@ -167,6 +167,33 @@ def _split_by_size(tb: TBlock) -> list[TBlock]:
     return out
 
 
+def _is_centred_line(l: Line, w: float) -> bool:
+    x0, _, x1, _ = l.bbox
+    return abs((x0 + x1) / 2 - w / 2) < w * 0.02 and (x1 - x0) < w * 0.6
+
+
+def _split_centred(tb: TBlock, w: float) -> list[TBlock]:
+    """Titles centred above body text often share a pdftext block with the text (or
+    with a byline). Split runs of centred short lines from the rest."""
+    flags = [_is_centred_line(l, w) for l in tb.lines]
+    if all(flags):
+        # a centred title and an italic byline under it are different things
+        flags = [all(r.italic for r in l.runs if r.text.strip()) for l in tb.lines]
+    if len(tb.lines) < 2 or all(flags) or not any(flags):
+        return [tb]
+    groups: list[list[Line]] = [[tb.lines[0]]]
+    for prev, cur, l in zip(flags, flags[1:], tb.lines[1:]):
+        if prev != cur:
+            groups.append([])
+        groups[-1].append(l)
+    out = []
+    for g in groups:
+        bb = (min(l.bbox[0] for l in g), min(l.bbox[1] for l in g),
+              max(l.bbox[2] for l in g), max(l.bbox[3] for l in g))
+        out.append(TBlock(g, bb, tb.page))
+    return out
+
+
 def _read_pages(pdf_path):
     from pdftext.extraction import dictionary_output
 
@@ -206,7 +233,8 @@ def _read_pages(pdf_path):
                     for r in ln.runs:
                         if not r.sup and bsize and r.size < 0.8 * bsize and is_note_mark(r.text):
                             r.sup = True
-                blocks.extend(_split_by_size(tb))
+                for part in _split_by_size(tb):
+                    blocks.extend(_split_centred(part, page["width"]))
         out.append((page["width"], page["height"], blocks))
     return out
 
@@ -463,6 +491,16 @@ def extract(pdf_path, progress=None) -> Extracted:
             if all_bold and len(b.lines) <= 2 and words <= 15 and not ends_sentence(b.plain):
                 b.kind = "heading"
                 b.level = len(heading_sizes) + 1
+                continue
+            # a short centred line with no closing punctuation is a section title even
+            # when it is set in body type (common in Word-made PDFs)
+            if (len(b.lines) <= 2 and words <= 12 and b.size <= body * 1.15
+                    and all(_is_centred_line(l, w) for l in b.lines)
+                    and not ends_sentence(b.plain) and not re.match(r"^[\d\W]", b.plain)
+                    and not re.search(r"(?i)\b(the|of|and|a|an|to|in|that|is|are|also|or)$", b.plain)
+                    and not all(r.italic for l in b.lines for r in l.runs if r.text.strip())):
+                b.kind = "heading"
+                b.level = len(heading_sizes) + 2
                 continue
             # block quote: indented on both sides relative to its column
             col = [o for o in bodyish if o is not b

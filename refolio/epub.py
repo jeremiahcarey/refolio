@@ -99,6 +99,14 @@ def parse(md: str) -> ParsedDoc:
     return ParsedDoc(meta, body, notes, order)
 
 
+# characters XML 1.0 forbids (most C0 controls, surrogates, U+FFFE/U+FFFF)
+BAD_XML_RE = re.compile("[\x00-\x08\x0b\x0c\x0e-\x1f\ud800-\udfff\ufffe\uffff]")
+
+
+def _xml_clean(s: str) -> str:
+    return BAD_XML_RE.sub("", s)
+
+
 def _md() -> MarkdownIt:
     return MarkdownIt("commonmark", {"html": True, "xhtmlOut": True})
 
@@ -118,7 +126,7 @@ def _fix_entities(s: str) -> str:
 def _render(md_text: str) -> str:
     """Render Markdown to XHTML, falling back to escaping raw HTML if the user's
     edits left it malformed (only <sup>/<sub>/<i>/<em>/<b> survive the fallback)."""
-    out = _fix_entities(_md().render(md_text))
+    out = _xml_clean(_fix_entities(_md().render(_xml_clean(md_text))))
     try:
         ET.fromstring(f"<div>{out}</div>")
         return out
@@ -275,6 +283,7 @@ def build_epub(md: str, mode: str = "endnotes", title: str | None = None,
                author: str | None = None, lang: str | None = None) -> BuildResult:
     if mode not in FOOTNOTE_MODES:
         raise ValueError(f"unknown footnote mode {mode!r}")
+    md = _xml_clean(md)
     doc = parse(md)
     title = (title or doc.meta.get("title") or "Untitled").strip()
     author = (author if author is not None else doc.meta.get("author", "")).strip()
