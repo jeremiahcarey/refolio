@@ -449,6 +449,8 @@ def extract(pdf_path, progress=None) -> Extracted:
             if len(b.lines) <= 2 and (b.y1 < h * MARGIN_ZONE or b.y0 > h * (1 - MARGIN_ZONE)):
                 seen.add(_norm_margin_text(b.plain))
         margin_counts.update(seen)
+    # alternating recto/verso headers appear on only about half the pages
+    repeat_min = max(2, 0.4 * n) if n < 6 else max(3, 0.25 * n)
     removed_margin = 0
     for w, h, blocks in pages:
         for b in blocks:
@@ -460,7 +462,7 @@ def extract(pdf_path, progress=None) -> Extracted:
                 continue
             t = b.plain
             if (PAGE_NUM_RE.match(t) or BOILERPLATE_RE.search(t)
-                    or (n >= 2 and margin_counts[_norm_margin_text(t)] >= max(2, 0.4 * n))):
+                    or (n >= 2 and re.search(r"\w", t) and margin_counts[_norm_margin_text(t)] >= repeat_min)):
                 b.kind = "skip"
                 removed_margin += 1
 
