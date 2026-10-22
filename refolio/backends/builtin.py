@@ -20,7 +20,7 @@ from dataclasses import dataclass, field
 from ..model import Block, Extracted
 from ..textutil import (vocab, escape_block_start, escape_inline, ends_sentence,
                         is_note_mark, join_hyphenated, normalize_spaces,
-                        SUP_DIGITS_RE, SUPERSCRIPT_DIGITS, unicode_sup_to_digits)
+                        OCR_MARK_CHARS, SUP_DIGITS_RE, SUPERSCRIPT_DIGITS, unicode_sup_to_digits)
 
 MARGIN_ZONE = 0.09  # top/bottom fraction of the page treated as header/footer zone
 
@@ -381,7 +381,7 @@ def _split_paragraphs(b: TBlock) -> list[list[Line]]:
 # ---------------------------------------------------------------------------
 # main entry point
 
-PLAIN_LEAD_RE = re.compile(r"^\s*\d{1,3}[.)]?\s+\S")
+PLAIN_LEAD_RE = re.compile(rf"^\s*(?:\d{{1,3}}[.)]?|[{re.escape(OCR_MARK_CHARS)}]{{1,3}}[.)])\s+\S")
 
 
 def _starts_with_mark(b: TBlock) -> bool:
@@ -422,7 +422,7 @@ def _vocab_text(pages) -> str:
             prev_hyph = False
             for l in b.lines:
                 words = l.plain.split()
-                hyph = bool(words) and words[-1].endswith(("-", "\u00ad"))
+                hyph = bool(words) and words[-1].endswith(("-", "\u00ad", "¬"))
                 if prev_hyph and words:
                     words = words[1:]
                 if hyph and words:
@@ -438,9 +438,16 @@ def _norm_margin_text(t: str) -> str:
 
 
 PAGE_NUM_RE = re.compile(r"^\s*(page\s*)?(\d{1,4}|[ivxlcdm]{1,7})(\s*(of|/)\s*\d+)?\s*$", re.I)
+# "xii PREFACE" / "PREFACE xiii" / "112 The Moral Universe": page number plus running title
+HEAD_NUM = r"(?:\d{1,4}|[ivxlc]{1,7}|[IVXLC]{1,7})"
+RUNNING_HEAD_RE = re.compile(rf"^(?!\s*(?i:chapter|part|section|appendix|book|volume)\b)\s*(?:{HEAD_NUM}\s+[A-Za-z][^.!?]{{2,60}}|[A-Za-z][^.!?]{{2,60}}\s+{HEAD_NUM})\s*$")
 BOILERPLATE_RE = re.compile(
     r"(downloaded from|all use subject to|this content downloaded|jstor\.org/terms|"
     r"for personal use only|copyright ©|©\s*\d{4}|doi\.org/10\.)", re.I)
+
+
+def _is_all_bold(b: TBlock) -> bool:
+    return all(r.bold for l in b.lines for r in l.runs if r.text.strip() and not r.sup)
 
 
 def extract(pdf_path, progress=None) -> Extracted:
@@ -484,9 +491,16 @@ def extract(pdf_path, progress=None) -> Extracted:
                 b.kind = "skip"
                 continue
             in_margin = b.y1 < h * MARGIN_ZONE or b.y0 > h * (1 - MARGIN_ZONE)
+            t = b.plain
+            # a one-line head, no larger than the body type, at the very top or bottom
+            if (len(b.lines) == 1 and b.size <= body * 1.02 and not _is_all_bold(b)
+                    and (b.y1 < h * 2 * MARGIN_ZONE or b.y0 > h * (1 - 2 * MARGIN_ZONE))
+                    and RUNNING_HEAD_RE.match(t)):
+                b.kind = "skip"
+                removed_margin += 1
+                continue
             if not in_margin or len(b.lines) > 2:
                 continue
-            t = b.plain
             if (PAGE_NUM_RE.match(t) or BOILERPLATE_RE.search(t)
                     or (n >= 2 and re.search(r"\w", t) and margin_counts[_norm_margin_text(t)] >= repeat_min)):
                 b.kind = "skip"

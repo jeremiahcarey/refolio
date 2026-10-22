@@ -230,6 +230,9 @@ async function openDoc(id) {
   $("#savestate").textContent = "";
   setEditorValue(d.markdown, false);
   computeMarkers();
+  // forget the previous document's page, or showPage(1) thinks nothing changed
+  state.page = 0;
+  delete $("#pageimg").dataset.src;
   showPage(1);
   renderNotices();
   if (!$("#preview").hidden) refreshPreview();

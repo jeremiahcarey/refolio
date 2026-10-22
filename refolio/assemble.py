@@ -12,7 +12,8 @@ import re
 from dataclasses import dataclass, field
 
 from .model import Block, Extracted
-from .textutil import SUP_RE, continues, is_note_mark, join_hyphenated
+from .textutil import (OCR_MARK_CHARS, SUP_RE, continues, is_note_mark, join_hyphenated, ocr_digits,
+                       ocr_number_pattern)
 
 LEAD_MARK_RE = re.compile(r"^\s*(?:<sup>\s*([^<]+?)\s*</sup>|(\d{1,3})[.)]?\s+(?=\S)|([*†‡§¶]+)\s*)")
 
@@ -42,10 +43,33 @@ def _split_marks(s: str) -> list[str]:
 FUSED_NOTE_RE = re.compile(r"(?<=[.)”\"'’])\s+(?=<sup>\s*\d{1,3}\s*</sup>)")
 
 
+# "<sup>47.</sup>": some converters keep the period of "47." inside the superscript
+SUP_PERIOD_RE = re.compile(r"<sup>\s*(\d{1,3})[.)]\s*</sup>")
+# an OCR-garbled lead such as "i. Richard Sorabji" (1) or "io. Stephen Walker" (10)
+OCR_LEAD_RE = re.compile(rf"^\s*([{re.escape(OCR_MARK_CHARS)}]{{1,3}})[.)]\s+(?=\S)")
+
+
+def _split_numbered(text: str, n: int) -> list[tuple[int, str]]:
+    """Split a run of notes fused into one block wherever the next number in
+    sequence (n + 1, possibly OCR-garbled) starts a new sentence."""
+    parts = []
+    while True:
+        rx = re.compile(rf"(?<=[.)”\"'’\]])\s+(?:<sup>\s*)?{ocr_number_pattern(n + 1)}[.)]?(?:\s*</sup>)?"
+                        r"\s+(?=[A-Z“\"‘(\[])")
+        m = rx.search(text)
+        if not m:
+            parts.append((n, text))
+            return parts
+        parts.append((n, text[:m.start()]))
+        text = text[m.end():]
+        n += 1
+
+
 def _collect_notes(blocks: list[Block]) -> list[Note]:
     notes: list[Note] = []
     pieces = [Block(b.kind, t, b.page, b.level, b.bbox)
-              for b in blocks if b.kind == "footnote" for t in FUSED_NOTE_RE.split(b.text)]
+              for b in blocks if b.kind == "footnote"
+              for t in FUSED_NOTE_RE.split(SUP_PERIOD_RE.sub(r"<sup>\1</sup>", b.text))]
     for b in pieces:
         m = LEAD_MARK_RE.match(b.text)
         mark = None
@@ -54,12 +78,23 @@ def _collect_notes(blocks: list[Block]) -> list[Note]:
             if not is_note_mark(mark):
                 mark = None
         if mark is None:
+            m = OCR_LEAD_RE.match(b.text)
+            val = ocr_digits(m.group(1)) if m else None
+            prev = int(notes[-1].mark) if notes and (notes[-1].mark or "").isdigit() else None
+            if val is not None and (prev is None or val in (1, prev + 1)):
+                mark = str(val)
+        if mark is None:
             if notes:  # continuation of the previous note (column or page break)
                 notes[-1].text = join_hyphenated(notes[-1].text, b.text)
                 continue
             notes.append(Note(None, b.text.strip(), b.page))
             continue
-        notes.append(Note(mark, b.text[m.end():].strip(), b.page))
+        rest = b.text[m.end():].strip()
+        if mark.isdigit():
+            for n, t in _split_numbered(rest, int(mark)):
+                notes.append(Note(str(n), t.strip(), b.page))
+        else:
+            notes.append(Note(mark, rest, b.page))
     return notes
 
 

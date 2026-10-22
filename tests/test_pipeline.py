@@ -270,6 +270,41 @@ def test_server_refuses_foreign_hosts_and_origins(tmp_path, monkeypatch):
     assert c.post("/api/projects", headers={"Origin": "http://localhost:9999"}).status_code == 403
 
 
+def test_ocr_garbled_and_fused_notes_are_split_by_sequence():
+    from refolio.assemble import _collect_notes
+    from refolio.model import Block
+
+    text = ("i. Richard Sorabji, Animal Minds (Ithaca, 1993). <sup>2.</sup> England may be. See p. 63. "
+            "io. is not next. <sup>3.</sup> Rodd, p. 62.")
+    notes = _collect_notes([Block("footnote", text, 13)])
+    assert [n.mark for n in notes] == ["1", "2", "3"]
+    assert notes[1].text.startswith("England") and notes[2].text.startswith("Rodd")
+    # an OCR lead that breaks the sequence stays part of the previous note
+    notes = _collect_notes([Block("footnote", "8. Foo. <sup>9.</sup> Bar, p. 63. io. Baz. <sup>11.</sup> Qux.", 1)])
+    assert [n.mark for n in notes] == ["8", "9", "10", "11"]
+
+
+def test_initials_are_not_ocr_note_marks_and_not_sign_hyphen_is_mended():
+    from refolio.assemble import _collect_notes
+    from refolio.model import Block
+    from refolio.textutil import join_hyphenated, normalize_spaces
+
+    notes = _collect_notes([Block("footnote", "4. Foo, p. 1.", 1), Block("footnote", "S. Harrison, Bar.", 1),
+                            Block("footnote", "B. Russell, Baz.", 1)])
+    assert [n.mark for n in notes] == ["4"] and "Harrison" in notes[0].text and "Russell" in notes[0].text
+    assert join_hyphenated("dabbler of intellec\u00ac", "tual pursuits") == "dabbler of intellectual pursuits"
+    assert normalize_spaces("the\u00ac ology") == "theology"
+
+
+def test_running_head_with_page_number_and_title_is_dropped():
+    from refolio.backends.builtin import RUNNING_HEAD_RE
+
+    for t in ("xii PREFACE", "PREFACE xiii", "XIV PREFACE", "112 The Moral Universe"):
+        assert RUNNING_HEAD_RE.match(t), t
+    for t in ("CHAPTER 3", "Part 2", "This is a sentence 3.", "Is it so? 4"):
+        assert not RUNNING_HEAD_RE.match(t), t
+
+
 # --- text-matrix scaled PDFs (Word export: pdftext reports every font size as 1.0) ---
 
 def _chars(text, h, x=0.0):

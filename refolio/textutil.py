@@ -33,6 +33,26 @@ def supify(text: str) -> str:
     return SUP_DIGITS_RE.sub(lambda m: f"<sup>{unicode_sup_to_digits(m.group(0))}</sup>", text)
 
 
+# OCR often reads note numbers as look-alike letters: "i." for 1, "io." for 10
+# (capitals are left out: "S. Harrison" or "B. Russell" are initials, not notes 5 and 8)
+_OCR_DIGITS = {"0": "0o", "1": "1il|!", "2": "2z", "5": "5s", "6": "6b", "8": "8", "9": "9g"}
+_OCR_TO_DIGIT = {c: d for d, cs in _OCR_DIGITS.items() for c in cs}
+OCR_MARK_CHARS = "".join(_OCR_TO_DIGIT) + "34567"
+
+
+def ocr_number_pattern(n: int) -> str:
+    """Regex source matching n written in digits or in OCR look-alikes."""
+    return "".join(f"[{re.escape(_OCR_DIGITS.get(d, d))}]" for d in str(n))
+
+
+def ocr_digits(s: str) -> int | None:
+    """The number a possibly OCR-garbled mark stands for, or None."""
+    if not s or not all(c in OCR_MARK_CHARS for c in s):
+        return None
+    d = "".join(_OCR_TO_DIGIT.get(c, c) for c in s)
+    return int(d) if d.isdigit() else None
+
+
 def is_note_mark(s: str) -> bool:
     s = re.sub(r"<[^>]+>", "", s)
     return bool(NOTE_MARK_RE.match(s.strip()))
@@ -73,13 +93,13 @@ def join_hyphenated(left: str, right: str) -> str:
         return right
     if not right:
         return left
-    m = re.search(r"(\w+)[-\u00ad]$", left)
+    m = re.search(r"(\w+)[-\u00ad¬]$", left)
     if m and right[:1].islower():
         nxt = re.match(r"\w+", right)
         if vocab.keep_hyphen(m.group(1), nxt.group(0) if nxt else ""):
             return left[:-1] + "-" + right
         return left[:-1] + right
-    if left.endswith("\u00ad"):
+    if left.endswith(("\u00ad", "¬")):
         return left[:-1] + right
     return left + " " + right
 
@@ -114,7 +134,13 @@ def escape_inline(text: str) -> str:
     return text.replace("\\", "\\\\").replace("*", "\\*").replace("`", "\\`")
 
 
+def _mend_not_sign(m: re.Match) -> str:
+    keep = vocab.keep_hyphen(m.group(1), m.group(2))
+    return m.group(1) + ("-" if keep else "")
+
+
 def normalize_spaces(text: str) -> str:
     text = text.replace(" ", " ").replace("ﬁ", "fi").replace("ﬂ", "fl")
     text = text.replace("ﬀ", "ff").replace("ﬃ", "ffi").replace("ﬄ", "ffl")
+    text = re.sub(r"(\w+)¬\s*(?=([a-z]\w*))", _mend_not_sign, text)  # OCR'd line-break hyphen
     return re.sub(r"[ \t]+", " ", text).strip()
