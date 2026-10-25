@@ -297,11 +297,17 @@ function computeMarkers() {
   const out = [];
   let m;
   while ((m = re.exec(text))) out.push({ page: +m[1], pos: m.index });
-  // measuring every marker is cheap for papers; for long books measure a sample
+  // measuring a marker lays out all the text before it, so for long books only a sample
+  // is measured up front; markY() measures the ones in between when they are needed
   const step = out.length > 120 ? Math.ceil(out.length / 120) : 1;
   out.forEach((mk, i) => { if (i % step === 0 || i === out.length - 1) mk.y = yOf(mk.pos); });
-  for (let i = 0; i < out.length; i++) if (out[i].y === undefined) out[i].y = out[i - 1].y;
   state.markers = out;
+}
+
+function markY(i) {
+  const mk = state.markers[i];
+  if (mk.y === undefined) mk.y = yOf(mk.pos);
+  return mk.y;
 }
 
 function pageAtPos(pos) {
@@ -311,9 +317,13 @@ function pageAtPos(pos) {
 }
 function pageAtScroll() {
   const top = editor.scrollTop + 30;
-  let page = state.markers.length ? state.markers[0].page : 1;
-  for (const m of state.markers) { if (m.y <= top) page = m.page; else break; }
-  return page;
+  const ms = state.markers;
+  if (!ms.length) return 1;
+  // last measured marker above the top, then exact positions for the unmeasured ones after it
+  let i = 0;
+  for (let j = 0; j < ms.length; j++) { if (ms[j].y !== undefined) { if (ms[j].y <= top) i = j; else break; } }
+  while (i + 1 < ms.length && markY(i + 1) <= top) i++;
+  return ms[i].page;
 }
 
 function showPage(n) {
@@ -335,9 +345,10 @@ editor.addEventListener("scroll", () => { if (follow()) showPage(pageAtScroll())
 
 function jumpToPage(n) {
   showPage(n);
-  const mk = state.markers.find((m) => m.page === n);
+  const i = state.markers.findIndex((m) => m.page === n);
+  const mk = state.markers[i];
   if (mk) {
-    editor.scrollTop = Math.max(0, mk.y - 24);
+    editor.scrollTop = Math.max(0, markY(i) - 24);
     editor.setSelectionRange(mk.pos, mk.pos);
   }
 }
