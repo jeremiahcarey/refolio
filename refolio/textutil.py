@@ -93,6 +93,10 @@ def join_hyphenated(left: str, right: str) -> str:
         return right
     if not right:
         return left
+    # a word hyphenated inside italics: "*inde-*" + "*fensible*" -> "*indefensible*"
+    close, opened = re.search(r"[-\u00ad¬](\*{1,2})$", left), re.match(r"\*{1,2}", right)
+    if close and opened and close.group(1) == opened.group(0):
+        left, right = left[:-len(close.group(1))], right[opened.end():]
     m = re.search(r"(\w+)[-\u00ad¬]$", left)
     if m and right[:1].islower():
         nxt = re.match(r"\w+", right)
@@ -132,6 +136,79 @@ def escape_block_start(text: str) -> str:
 
 def escape_inline(text: str) -> str:
     return text.replace("\\", "\\\\").replace("*", "\\*").replace("`", "\\`")
+
+
+# Marker joins the lines of a block with two spaces; html_to_inline can keep that as this
+# character so the mender can tell "ex  tends" (a line break) from "ex tends".
+LINE_BREAK = "\ue000"
+# the second word is only looked at, not consumed, so "qualifi ed" is found in "is qualifi ed."
+_SPLIT_WORD_RE = re.compile(
+    rf"(?<![A-Za-z-])(?<![A-Za-z]['’])([A-Za-z]{{2,}})([ \t{LINE_BREAK}]+)(?=([A-Za-z]+)(?![A-Za-z-])(?!['’][A-Za-z]))")
+_GLUED_RE = re.compile(r"(?<![A-Za-z-])[A-Za-z]{6,}(?![A-Za-z-])")
+_LIGATURE_END = ("Th", "fi", "fl", "ff", "ffi", "ffl")
+_COMMON = set("""in to on no so as at he it is us an or be by do go if my of up we me the and for are but not you
+all can any one was has had may per too out off our its who why how his her him she they them than then that this
+these those with from into onto some more most many much such what when were been have will would could should""".split())
+_SUFFIXES = ("ing", "ion", "ers", "ed", "es", "er", "ly", "s", "d")
+
+
+def _stem(w: str) -> str:
+    for suf in _SUFFIXES:
+        if w.endswith(suf) and len(w) - len(suf) >= 4:
+            return w[:-len(suf)]
+    return w
+
+
+def word_set(text: str) -> set[str]:
+    """Lower-case words of `text`, plus its hyphenated compounds ("single-file") whole."""
+    words = {w.lower() for w in re.findall(r"[A-Za-z]{2,}", text)}
+    words |= {w.lower() for w in re.findall(r"[A-Za-z]+(?:-[A-Za-z]+)+", text)}
+    return words
+
+
+def mend_split_words(text: str, words: set[str]) -> str:
+    """Repair words that a converter split in two, or glued where it should not have:
+    a ligature's ghost space ("Th is", "qualifi ed"), a line-break hyphen it dropped
+    ("ex tends") or one it swallowed ("equalconsideration"). `words` is a lexicon of
+    correctly spelled words, taken from another reading of the same PDF.
+
+    Two neighbours are joined only when the joined form is in it and the pair looks split: a
+    half is not a word, the first ends in a ligature ("Th", "ff"), or the break is a line
+    break and neither half is a common small word. So "off the" and "any one" stay apart."""
+    plain = {w for w in words if "-" not in w}
+    glued = {w.replace("-", ""): w for w in words if "-" in w}
+    stems = {_stem(w) for w in plain}
+
+    def fix(m: re.Match) -> str:
+        a, sep, b = m.groups()
+        la, lb = a.lower(), b.lower()
+        if len(b) < 2 and not a.endswith(_LIGATURE_END):
+            return m.group(0)
+        joined = la + lb
+        # the lexicon may only have another form of the word ("offers" for "off er")
+        if joined not in plain and joined not in glued and _stem(joined) not in stems:
+            return m.group(0)
+        # two real words at a line break stay apart even if the lexicon has them as a hyphenated
+        # compound: the break may or may not have hidden the hyphen
+        real = joined in plain or _stem(joined) in stems
+        if (la not in plain or lb not in plain or a.endswith(_LIGATURE_END)
+                or (real and LINE_BREAK in sep and la not in _COMMON and lb not in _COMMON)):
+            return a
+        return m.group(0)
+
+    def unglue(m: re.Match) -> str:
+        low = m.group(0).lower()
+        if low in glued and low not in plain:
+            w = glued[low]
+            return w[0].upper() + w[1:] if m.group(0)[0].isupper() else w
+        return m.group(0)
+
+    for _ in range(3):  # "suff er ing": one pass joins each word to the next, not chains
+        new = _SPLIT_WORD_RE.sub(fix, text)
+        if new == text:
+            break
+        text = new
+    return _GLUED_RE.sub(unglue, text.replace(LINE_BREAK, " "))
 
 
 def _mend_not_sign(m: re.Match) -> str:

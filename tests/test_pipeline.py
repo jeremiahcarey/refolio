@@ -350,3 +350,85 @@ def test_plain_digit_marks_and_fused_notes_link():
     b2 = [Block("para", "It was 1934. See chapter 1 and p. 5.", 3),
           Block("footnote", "<sup>1</sup> A note.", 3)]
     assert assemble(Extracted(b2, 3)).stats["linked"] == 0
+
+
+def _glyph(ch, x0, x1):
+    return {"char": ch, "bbox": [x0, 100.0, x1, 108.0]}
+
+
+def test_ligature_ghost_spaces_dropped_but_real_spaces_kept():
+    # "Th" and "ff" are two glyphs sharing one box, followed by a space inside that box. After
+    # "Th" the next letter butts up against the ligature (ghost); after "Jeff" it is a word
+    # apart (real). A line-end soft hyphen arrives as \x02.
+    chars = [_glyph("T", 0, 9), _glyph("h", 0, 9), _glyph(" ", 4, 6), _glyph("i", 9, 11),
+             _glyph(" ", 11, 13), _glyph("J", 13, 16), _glyph("e", 16, 19), _glyph("f", 19, 22),
+             _glyph("f", 19, 22), _glyph(" ", 18, 20), _glyph("M", 25, 32), _glyph("\x02", 32, 34), _glyph("\r", 34, 34),
+             _glyph("\n", 34, 34)]
+    assert builtin._span_text({"text": "", "chars": chars}) == "Thi Jeff M-"
+
+
+def test_italic_titles_keep_their_spaces_and_notes_start_at_numbers_only_after_a_sentence():
+    R, L = builtin.Run, builtin.Line
+    lines = [L([R("*", 9), R("Farm", 9, italic=True)], (0, 0, 1, 1)),
+             L([R("Animal Welfare", 9, italic=True), R(" (Ames), ", 9), R("Eggs", 9, italic=True)], (0, 0, 1, 1)),
+             L([R("and", 9, italic=True)], (0, 0, 1, 1)), L([R("Moral", 9, italic=True)], (0, 0, 1, 1))]
+    assert "*and Moral*" in builtin._lines_to_text(lines[2:])
+    assert builtin._lines_to_text([L([R("end.", 9), R(" ", 9), R("3", 6, sup=True), R(" next", 9)], (0, 0, 1, 1))]) \
+        == "end.<sup>3</sup> next"
+    # an italic title opening a note is emphasis, not an asterisk mark
+    from refolio.assemble import _collect_notes
+    notes = _collect_notes([Block("footnote", "<sup>19</sup> Rollin, *Farm*", 8),
+                            Block("footnote", "*Animal Welfare* (Ames, 1995).", 8)])
+    assert len(notes) == 1 and notes[0].text.endswith("(Ames, 1995).")
+
+
+def test_mend_split_words_uses_lexicon_and_line_breaks():
+    from refolio.textutil import LINE_BREAK as LB, mend_split_words, word_set
+    words = word_set("This paper offers a qualified view of single-file and equal-consideration; it extends. "
+                     "Prudentially speaking, we are off the mark; anyone can see it, any day, one by one. Parfit and Jeff disagree.")
+    fix = lambda t: mend_split_words(t, words)
+    assert fix("Th is paper off ers a qualifi ed view") == "This paper offers a qualified view"
+    assert fix("'Th is' and Parfi t, Jeff Parfit") == "'This' and Parfit, Jeff Parfit"
+    assert fix("we are off the mark; any one can see") == "we are off the mark; any one can see"
+    # a line break that hid the hyphen, or Marker's own dehyphenation of a compound
+    assert fix(f"it ex{LB}tends, pruden{LB}tially, in a singlefi le chute") == "it extends, prudentially, in a single-file chute"
+    assert fix(f"equal{LB}consideration, any{LB}one") == "equal consideration, any one"
+    assert fix("") == ""
+
+
+def test_marker_style_notes_are_numbered_by_sequence_and_marks_found():
+    # Marker keeps no superscripts: marks are plain, spaced digits; notes fuse, one loses its number
+    blocks = [
+        Block("para", "animals lack moral status. 3 This may be due to accidents, respectively 4 ; and so on.", 2),
+        Block("para", "Some deny it, 5 and others do not. Done. 6", 2),
+        Block("footnote", "<sup>2</sup> First note, p. 70-80). But for factual", 2),
+        Block("footnote", "claims. 3 *See*, e.g., Tom Regan. 4  Peter Singer, *Animal Liberation*.", 2),
+        Block("footnote", "<sup> </sup>Fifth note, Part I. <sup>6</sup> Sixth note.", 2),
+    ]
+    a = assemble(Extracted(blocks, 2))
+    assert a.stats["notes"] == 5 and a.stats["linked"] == 4 and a.stats["unmatched_refs"] == 0
+    assert "status.[^1] This" in a.markdown and "respectively[^2]; and" in a.markdown
+    assert "[^1]: *See*, e.g., Tom Regan." in a.markdown and "[^2]: Peter Singer, *Animal Liberation*." in a.markdown
+    assert "[^3]: Fifth note, Part I." in a.markdown and "[^4]: Sixth note." in a.markdown
+    # "ch. 3 and" is not a mark
+    b2 = [Block("para", "See ch. 3 and p. 5.", 1), Block("footnote", "<sup>3</sup> A note.", 1)]
+    assert assemble(Extracted(b2, 1)).stats["linked"] == 0
+
+
+def test_marker_footnote_fixes_in_html_and_by_box():
+    def node(bt, html="", children=None, bbox=(0, 0, 1, 1)):
+        return SimpleNamespace(block_type=bt, html=html, children=children, bbox=bbox)
+    # an entity cut in two by </sup>, and a <sup> around ordinary text
+    assert marker_backend.html_to_inline("<p>x <sup> 30 &amp;#</sup>x27;Position (<sup>(1990).</sup> More</p>") \
+        == "x <sup> 30 </sup>'Position ((1990). More"
+    assert marker_backend.html_to_inline("<p>on <i>Title</i> , and ( <i>Book</i> )</p>") == "on *Title*, and (*Book* )"
+    # a Text block on exactly the box of a Footnote is the tail of a note
+    page = node("Page", children=[
+        node("Text", "<p>Body text.</p>", bbox=(54, 80, 371, 156)),
+        node("Text", "<p>tail of a note (New York: Oxford</p>", bbox=(54, 458, 371, 488)),
+        node("Footnote", "<p></p>", bbox=(54, 458, 370, 488)),
+        node("Footnote", "<p>University Press, 2000).</p>", bbox=(54, 482, 371, 529)),
+    ])
+    blocks = []
+    marker_backend._walk(page, 1, blocks, [], marker_backend._footnote_boxes(page, []))
+    assert [b.kind for b in blocks] == ["para", "footnote", "footnote"]

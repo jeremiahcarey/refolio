@@ -194,6 +194,8 @@ The second superscript rule is evaluated per _block_ rather than per line, after
 - a run's `size` is the median char box height (only ratios matter downstream, so height stands in for point size);
 - a digit or symbol (`MARK_CHARS`) whose box is under 0.8× the line's median char height becomes its own superscript run.
 
+**Ligature ghost spaces and soft hyphens.** Some fonts (Brill's Garamond, for one) set "Th", "fi" and "ff" as two glyphs sharing one box, followed by a space inside that box, so pdftext's text reads "Th is" and "qualifi ed". Span text is therefore rebuilt from the character boxes (`_clean_chars`). A space is dropped when the two glyphs before it share a box, it ends inside that box and the next letter starts right where the ligature ends; a real space after "Jeff" has the next word a space-width away, which is what tells them apart. The same pass turns the `\x02` that pdfium reports for a line-end soft hyphen into `-`, so `join_hyphenated` can mend the word (before this, the bogus-size path produced "vege tarianism").
+
 **Mixed-size blocks.** pdftext can put the last body paragraph of a page and its footnotes in one block. After the superscript pass, `_split_by_size` splits a block wherever consecutive lines' dominant (non-superscript) size differs by more than 8%; a line that is only a note mark takes the size of the line after it. This applies to every PDF, not only bogus-size ones.
 
 ### 6.3 Body size
@@ -206,7 +208,10 @@ A block is a margin candidate if it has ≤ 2 lines and sits in the top or botto
 
 - it's a page number: `PAGE_NUM_RE` matches Arabic or Roman numerals and "Page N of M";
 - it's known boilerplate: `BOILERPLATE_RE` catches "downloaded from", "all use subject to", JSTOR terms, ©, DOIs;
+- it starts with "©" and sits in the outer 15% of the page (a publisher's copyright line, which would otherwise be glued onto the last footnote);
 - its normalised text appears on ≥ max(2, 40% of pages). Normalising lower-cases the text and replaces digit runs with `#`, so "118 A. N. Author" and "120 A. N. Author" count as the same line.
+
+Running heads that sit lower than the 9% zone are caught by the repeat rule alone, which looks in the top 15% but only at lines no larger than body type, so titles and bylines survive.
 
 The 40% threshold is chosen so that alternating even/odd heads (author on one side, title on the other) each clear it on documents of five or more pages.
 
@@ -265,7 +270,11 @@ File: `refolio/backends/marker_backend.py`.
   - two short notes can arrive fused in one block;
   - in-text marks lose their superscript and arrive as plain digits glued to the preceding punctuation (`civilization."1 One`).
 
-  The adapter doesn't fix these; the shared assembler does (§8.1, §8.3).
+  The shared assembler fixes most of these (§8.1, §8.3). The adapter and `convert.py` fix the rest, with no superscripts, font sizes or character boxes to go on:
+
+  - **Ghost spaces and lost hyphens.** Marker reads the same text layer, so it has "Th is" and "off ers" (§6.2), and it drops line-end hyphens, leaving "ex  tends" (two spaces, which is how it joins every line). `html_to_inline(keep_breaks=True)` keeps that double space as `LINE_BREAK`. `convert()` first reads the PDF with the built-in engine and assembles it (about a second) to get a **lexicon** of correctly spelled words, including hyphenated compounds, and `mend_split_words` then rejoins neighbouring words when the joined form is in the lexicon and the pair looks split: a half isn't a word, the first ends in a ligature, or it was a line break between two uncommon words. It also restores hyphens Marker swallowed ("equalconsideration" to "equal-consideration"). The lexicon is empty for scanned PDFs, which have no ghost spaces. The built-in pass runs under the PDFium lock.
+  - **Entities cut by `</sup>`.** The HTML can contain `<sup> 30 &amp;#</sup>x27;`; the tag is moved past the entity. A `<sup>` around anything that isn't a note mark is unwrapped, and spans' stray spaces before punctuation are removed.
+  - **Note tails labelled as Text.** A Text block whose box matches an (empty) Footnote block's box is turned into a footnote, so a note that runs over a page break isn't spliced into the body.
 
 ## 8. Assembly: footnotes, paragraphs, hyphens
 
@@ -281,11 +290,15 @@ File: `refolio/assemble.py`, plus helpers in `textutil.py`.
 
 Before parsing, a footnote block is split where a second `<sup>N</sup>` follows a finished sentence (`FUSED_NOTE_RE`), because converters sometimes fuse adjacent short notes into one block.
 
+A leading `*` only counts as a mark when whitespace follows it; `*Title*` at the start of a note is italics. In the built-in converter a plain "4. " line starts a new note only after a line that ended a sentence, so "chs. 3,\n4. Another" stays one note. A page's note stack is recognised by a superscript mark anywhere in small print, since pdftext often runs several notes into one block.
+
 **A footnote block with no leading mark is a continuation of the previous note.** Because footnote blocks arrive in reading order (left column, right column, next page), this one rule handles notes that continue in the next column and notes that continue onto the next page.
 
 ### 8.2 Linking marks to notes
 
 **Plain-digit marks first.** If a converter lost the superscript formatting, a mark reaches the assembler as plain digits (`wake”3—for`). `_promote_plain_marks` runs before linking. For each numbered note with no `<sup>N</sup>` reference in the body on its own page or the page before, it converts the first plain `N` on the note's page (or, failing that, the previous page) into `<sup>N</sup>`. The match must follow a letter, sentence punctuation or a closing quote with no space (`PLAIN_MARK`), and be followed by whitespace, a dash or the end of the block. A cursor keeps matches in document order. This stops years and "chapter 1" from being taken for marks, but it is a heuristic: it adds a warning whenever it fires, so the reviewer knows to check.
+
+Marker's marks arrive as plain digits with spaces round them ("status. 3 Th is", "ethics, 9 feminist", "risks 34 —could"). `_plain_mark_re` accepts these, except after "p.", "ch." and the like, and the mark's own spaces are removed. Its notes arrive fused ("... claims. 3 See ..."), sometimes with the number lost (`<sup> </sup>`). `_collect_notes` therefore splits every numbered note at the next number in sequence, and gives an empty mark the number after the previous note. An explicit `<sup>N+1</sup>` splits without a sentence end before it, since a URL note has none.
 
 `<sup>` contents are split on commas and spaces, so `<sup>3,4</sup>` gives two marks. Each mark is matched by `_find_note`:
 
@@ -475,7 +488,7 @@ One page, two screens (home and review), routed with `location.hash` (`#/` and `
 
 ## 13. Tests
 
-`tests/test_pipeline.py` has 20 tests and runs in about 15 seconds when EPUBCheck is cached (it was about 75 seconds on a cold JVM).
+`tests/test_pipeline.py` has 29 tests and runs in about 15 seconds when EPUBCheck is cached (it was about 75 seconds on a cold JVM).
 
 | Area               | Tests                                                                                                                                                                                                                                                                                                                                                                        |
 | ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

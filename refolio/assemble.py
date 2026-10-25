@@ -15,7 +15,7 @@ from .model import Block, Extracted
 from .textutil import (OCR_MARK_CHARS, SUP_RE, continues, is_note_mark, join_hyphenated, ocr_digits,
                        ocr_number_pattern)
 
-LEAD_MARK_RE = re.compile(r"^\s*(?:<sup>\s*([^<]+?)\s*</sup>|(\d{1,3})[.)]?\s+(?=\S)|([*†‡§¶]+)\s*)")
+LEAD_MARK_RE = re.compile(r"^\s*(?:<sup>\s*([^<]+?)\s*</sup>|(\d{1,3})[.)]?\s+(?=\S)|([†‡§¶]+|\*+(?=\s))\s*)")
 
 
 @dataclass
@@ -32,6 +32,9 @@ class Assembled:
     markdown: str
     warnings: list[str] = field(default_factory=list)
     stats: dict = field(default_factory=dict)
+
+
+EMPTY_SUP_RE = re.compile(r"\s*<sup>\s*</sup>\s*")
 
 
 def _split_marks(s: str) -> list[str]:
@@ -54,8 +57,11 @@ def _split_numbered(text: str, n: int) -> list[tuple[int, str]]:
     sequence (n + 1, possibly OCR-garbled) starts a new sentence."""
     parts = []
     while True:
-        rx = re.compile(rf"(?<=[.)”\"'’\]])\s+(?:<sup>\s*)?{ocr_number_pattern(n + 1)}[.)]?(?:\s*</sup>)?"
-                        r"\s+(?=[A-Z“\"‘(\[])")
+        nxt = ocr_number_pattern(n + 1)
+        rx = re.compile(rf"(?<=[.)”\"'’\]])\s+(?:<sup>\s*)?{nxt}[.)]?(?:\s*</sup>)?"
+                        r"\s+(?=\*{0,2}[A-Z“\"'‘(\[]|https?:)"
+                        # an explicit superscript needs no sentence end before it ("... .html <sup>30</sup>")
+                        rf"|\s*<sup>\s*{n + 1}[.)]?\s*</sup>\s*")
         m = rx.search(text)
         if not m:
             parts.append((n, text))
@@ -71,6 +77,11 @@ def _collect_notes(blocks: list[Block]) -> list[Note]:
               for b in blocks if b.kind == "footnote"
               for t in FUSED_NOTE_RE.split(SUP_PERIOD_RE.sub(r"<sup>\1</sup>", b.text))]
     for b in pieces:
+        # Marker leaves an empty <sup> where the number was lost: it is the next one in sequence
+        if EMPTY_SUP_RE.match(b.text) and notes and (notes[-1].mark or "").isdigit():
+            b.text = f"<sup>{int(notes[-1].mark) + 1}</sup>" + EMPTY_SUP_RE.sub("", b.text, count=1)
+        else:
+            b.text = EMPTY_SUP_RE.sub("", b.text)
         m = LEAD_MARK_RE.match(b.text)
         mark = None
         if m:
@@ -85,7 +96,12 @@ def _collect_notes(blocks: list[Block]) -> list[Note]:
                 mark = str(val)
         if mark is None:
             if notes:  # continuation of the previous note (column or page break)
-                notes[-1].text = join_hyphenated(notes[-1].text, b.text)
+                prev = notes[-1]
+                joined = join_hyphenated(prev.text, b.text)
+                # the next note's number may be buried in it ("... claims. 3 See, e.g., ...")
+                parts = _split_numbered(joined, int(prev.mark)) if (prev.mark or "").isdigit() else [(0, joined)]
+                prev.text = parts[0][1].strip()
+                notes.extend(Note(str(k), t.strip(), b.page) for k, t in parts[1:])
                 continue
             notes.append(Note(None, b.text.strip(), b.page))
             continue
@@ -113,8 +129,16 @@ def _find_note(notes: list[Note], mark: str, page: int) -> Note | None:
 
 
 def _plain_mark_re(mark: str) -> re.Pattern:
-    # "civilization.”1 One", "wake”3—for": digits glued to the word or punctuation before
-    return re.compile(rf"(?<=[A-Za-z.,;:!?”’\"')\]])(?<!\d){re.escape(mark)}(?!\d)(?=[\s—–]|$)")
+    m = re.escape(mark)
+    return re.compile(
+        # "civilization.”1 One", "wake”3—for": digits glued to the word or punctuation before
+        rf"(?<=[A-Za-z.,;:!?”’\"')\]])(?<!\d){m}(?!\d)(?=[\s—–]|$)"
+        # Marker spaces the mark out: "status. 3 Th is", but not "ch. 3 and" or "p. 5 ."
+        rf"|(?<=[.!?”’\"')\]])(?<!\bp\.)(?<!\bpp\.)(?<!\bch\.)(?<!\bchs\.)(?<!\bno\.)(?<!\bvol\.)"
+        rf"(?<!\bsec\.)(?<!\bfig\.)[ ]{m}(?!\d)(?=\s*(?:$|[;:,.)]|[A-Z“\"‘(]))"
+        # "ethics, 9 feminist", "qualifications 8 )", "respectively 4 ;"
+        rf"|(?<=[,;:])[ ]{m}(?!\d)(?=\s)"
+        rf"|(?<=[A-Za-z])[ ]{m}(?=\s*[;:,)—–])")
 
 
 def _promote_plain_marks(notes: list[Note], body: list[Block]) -> int:
@@ -143,7 +167,8 @@ def _promote_plain_marks(notes: list[Note], body: list[Block]) -> int:
                     break
             if hit:
                 i, m = hit
-                body[i].text = body[i].text[:m.start()] + f"<sup>{n.mark}</sup>" + body[i].text[m.end():]
+                tail = re.sub(r"^\s+(?=[;:,.])", "", body[i].text[m.end():])  # "respectively 4 ;"
+                body[i].text = body[i].text[:m.start()] + f"<sup>{n.mark}</sup>" + tail
                 cursor = i
                 promoted += 1
                 break

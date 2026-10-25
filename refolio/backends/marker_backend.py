@@ -14,7 +14,8 @@ import re
 from html.parser import HTMLParser
 
 from ..model import Block, Extracted
-from ..textutil import escape_block_start, escape_inline, normalize_spaces, supify
+from ..textutil import (LINE_BREAK, escape_block_start, escape_inline, mend_split_words, normalize_spaces,
+                        supify)
 
 _models = None
 
@@ -88,10 +89,20 @@ class _Inline(HTMLParser):
         self.out.append(data)
 
 
-def html_to_inline(html: str) -> str:
+def html_to_inline(html: str, keep_breaks: bool = False) -> str:
+    """`keep_breaks` leaves a LINE_BREAK where Marker joined two lines, for `mend_blocks`."""
     p = _Inline()
-    p.feed(html or "")
+    # Marker can close a <sup> in the middle of a character reference: "<sup> 30 &#</sup>x27;"
+    html = re.sub(r"(<sup>[^<]*?)(&amp;#|&#)</sup>([xX]?[0-9a-fA-F]+;)", r"\1</sup>\2\3", html or "")
+    p.feed(html)
     text = "".join(p.out)
+    # a <sup> around something that is not a note mark ("<sup>(1990).</sup>") is a layout accident
+    text = re.sub(r"<sup>(?!\s*(?:\d{1,3}|[*†‡§¶‖#]+)?\s*</sup>)(.*?)</sup>", r"\1", text)
+    # spans leave a space before punctuation and after an opening bracket: "*Title* ,", "( *Title*"
+    text = re.sub(r"(?<=[\w*)”’'\"\]])[ \t]+(?=[,.;:!?](?:\s|$))", "", text)
+    text = re.sub(r"(?<=[(\[])[ \t]+", "", text)
+    if keep_breaks:
+        text = re.sub(r"[ \t]{2,}", LINE_BREAK, text)
     text = re.sub(r"\*\*\*\*|(?<![*\w])\*\*(?![*\w])", "", text)  # empty emphasis
     return supify(normalize_spaces(htmllib.unescape(text)))
 
@@ -106,7 +117,19 @@ _SKIP = {"PageHeader", "PageFooter", "Picture", "Figure", "Diagram", "ChemicalBl
          "Reference", "Line", "Span", "Char"}
 
 
-def _walk(node, page_no, out, warnings):
+def _footnote_boxes(node, out: list) -> list:
+    if node.block_type == "Footnote" and node.bbox:
+        out.append(tuple(node.bbox))
+    for c in node.children or ():
+        _footnote_boxes(c, out)
+    return out
+
+
+def _same_box(a, b, tol=3) -> bool:
+    return all(abs(x - y) <= tol for x, y in zip(a, b))
+
+
+def _walk(node, page_no, out, warnings, fn_boxes=()):
     bt = node.block_type
     if bt in _SKIP:
         if bt in ("Picture", "Figure", "Diagram"):
@@ -114,10 +137,14 @@ def _walk(node, page_no, out, warnings):
         return
     if node.children and bt not in _KIND:
         for c in node.children:
-            _walk(c, page_no, out, warnings)
+            _walk(c, page_no, out, warnings, fn_boxes)
         return
     kind = _KIND.get(bt, "para")
-    text = html_to_inline(node.html)
+    # Marker sometimes labels the tail of a note that runs on from the page before as Text, and
+    # leaves an empty Footnote block on exactly the same box; the box tells the truth
+    if kind == "para" and node.bbox and any(_same_box(node.bbox, b) for b in fn_boxes):
+        kind = "footnote"
+    text = html_to_inline(node.html, keep_breaks=True)
     if not text:
         return
     level = 0
@@ -130,7 +157,21 @@ def _walk(node, page_no, out, warnings):
     out.append(Block(kind, text, page_no, level, tuple(node.bbox) if node.bbox else None))
 
 
-def extract(pdf_path, allow_ocr: bool = True, progress=None) -> Extracted:
+def mend_blocks(blocks: list[Block], words: set[str]) -> int:
+    """Marker reads the text layer through pdftext, so it inherits ligature ghost spaces
+    ("Th is") and loses line-break hyphens ("ex  tends"). It has no character boxes to
+    tell them from real spaces, so check each pair of neighbours against `words`. Always run
+    it: it also turns the LINE_BREAK marks back into spaces."""
+    changed = 0
+    for b in blocks:
+        new = mend_split_words(b.text, words)
+        if new != b.text:
+            b.text = new
+            changed += 1
+    return changed
+
+
+def extract(pdf_path, allow_ocr: bool = True, progress=None, lexicon: set[str] | None = None) -> Extracted:
     global _models
     from marker.config.parser import ConfigParser
     from marker.converters.pdf import PdfConverter
@@ -166,9 +207,11 @@ def extract(pdf_path, allow_ocr: bool = True, progress=None) -> Extracted:
     blocks: list[Block] = []
     images: list[str] = []
     for i, page in enumerate(rendered.children):
-        _walk(page, i + 1, blocks, images)
+        _walk(page, i + 1, blocks, images, _footnote_boxes(page, []))
     if images:
         warnings.append(f"Skipped {len(images)} image(s) (figures aren't read aloud).")
+
+    mend_blocks(blocks, lexicon or set())
 
     # heading levels: first heading on the first pages becomes the title (level 1)
     title = ""

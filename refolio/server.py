@@ -72,7 +72,8 @@ def _run_conversion(pid: str, engine: str, allow_ocr: bool):
     try:
         lock = _pdf_lock if engine == "builtin" else threading.Lock()
         with lock:
-            result = convert(p / "source.pdf", engine=engine, allow_ocr=allow_ocr, progress=progress)
+            result = convert(p / "source.pdf", engine=engine, allow_ocr=allow_ocr, progress=progress,
+                             pdf_lock=_pdf_lock if engine != "builtin" else None)
         (p / "document.md").write_text(result.markdown)
         meta = _read_meta(p)
         fm, _ = parse_front_matter(result.markdown)

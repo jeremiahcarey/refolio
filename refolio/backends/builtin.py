@@ -92,6 +92,39 @@ def _char_h(c) -> float:
     return b[3] - b[1]
 
 
+def _clean_chars(chars) -> list:
+    """Drop the characters that pdftext reports but that are not text.
+
+    Some fonts (Brill's Garamond among them) encode a ligature such as "Th", "fi" or "ff"
+    as two glyphs sharing one box, followed by a zero-width space that sits inside that box.
+    Left in, it reads "Th is" and "qualifi ed". Such a space is told from a real one by what
+    follows it: the next letter starts right where the ligature ends. After a real space (even
+    one that ends a word like "Jeff") it starts a space's width later. A soft hyphen at a line
+    end arrives as \x02; it becomes a hyphen so the line joiner can decide whether to keep it."""
+    chars = [c for c in chars if c["char"] not in "\r\n"]
+    out: list = []
+    for i, c in enumerate(chars):
+        if c["char"] == "\x02":
+            c = {**c, "char": "-"}
+        elif (c["char"] == " " and i + 2 == len(chars) and chars[i + 1]["char"] in "-\x02"
+                and chars[i + 1]["bbox"][0] - c["bbox"][0] < 0.5 * (c["bbox"][2] - c["bbox"][0])):
+            continue  # justified lines: a space the line-end hyphen is printed on top of ("ex -")
+        elif c["char"] == " " and len(out) >= 2 and i + 1 < len(chars):
+            a, b, nxt = out[-2]["bbox"], out[-1]["bbox"], chars[i + 1]["bbox"]
+            if (out[-1]["char"] != " " and abs(a[0] - b[0]) < 0.5 and abs(a[2] - b[2]) < 0.5
+                    and c["bbox"][2] <= b[2] + 0.7 and nxt[0] - b[2] < 0.6):
+                continue
+        out.append(c)
+    return out
+
+
+def _span_text(span) -> str:
+    chars = span.get("chars")
+    if not chars:
+        return span["text"].replace("\n", "")
+    return "".join(c["char"] for c in _clean_chars(chars))
+
+
 def _bogus_size_runs(span, line_med, italic, bold) -> list[Run]:
     """Some producers (Word's PDF export, for one) scale text through the text matrix
     and leave the font size at 1.0, so pdftext can't tell body text from small print or
@@ -107,10 +140,10 @@ def _bogus_size_runs(span, line_med, italic, bold) -> list[Run]:
             return
         hs = [h for h in (_char_h(c) for c in cur) if h > 0]
         size = statistics.median(hs) if hs else line_med
-        text = "".join(c["char"] for c in cur).replace("\n", "").replace("\r", "")
+        text = "".join(c["char"] for c in cur)
         runs.append(Run(unicode_sup_to_digits(text) if cur_sup else text, size, italic, bold, cur_sup))
 
-    for c in span["chars"]:
+    for c in _clean_chars(span["chars"]):
         h = _char_h(c)
         small = (bool(line_med) and 0 < h < 0.8 * line_med and c["char"] in MARK_CHARS) \
             or c["char"] in SUPERSCRIPT_DIGITS
@@ -226,7 +259,7 @@ def _read_pages(pdf_path):
                            if (h := _char_h(c)) > 0]
                 line_med = statistics.median(heights) if heights else 0
                 for s in l["spans"]:
-                    text = s["text"].replace("\n", "")
+                    text = _span_text(s)
                     if not text:
                         continue
                     size = s["font"].get("size") or main
@@ -354,7 +387,12 @@ def _lines_to_text(lines: list[Line], allow_italic=True) -> str:
     for l in lines:
         piece = _runs_to_md(l.runs, allow_italic)
         text = join_hyphenated(text, piece) if text else piece.strip()
-    text = re.sub(r"\*\s*\*", "", text)  # "*a* *b*" artefacts collapse to "*a b*"
+    text = re.sub(r"\*(\s*)\*", r"\1", text)  # "*a* *b*" artefacts collapse to "*a b*"
+    # typesetters' spacing around italics and note marks: "*Title* , 2nd", "( *Title*", "end. <sup>3</sup>"
+    text = re.sub(r"\*[ \t]+(?=[.,:;!?)\]])", "*", text)
+    text = re.sub(r"(?<=[(\[])[ \t]+(?=\*)", "", text)
+    text = re.sub(r"[ \t]+(?=<sup>)", "", text)
+    text = re.sub(r"(?<=</sup>)[ \t]+(?=[,.;:])", "", text)
     return normalize_spaces(text)
 
 
@@ -368,6 +406,10 @@ def _split_paragraphs(b: TBlock) -> list[list[Line]]:
     right = max(l.bbox[2] for l in b.lines)
     paras, cur = [], [b.lines[0]]
     for prev, l in zip(b.lines, b.lines[1:]):
+        first = next((r for r in l.runs if r.text.strip()), None)
+        if first is not None and first.sup and is_note_mark(first.text):
+            cur.append(l)  # the mark belongs to the sentence before it
+            continue
         indented = l.bbox[0] - left > 6
         prev_short = right - prev.bbox[2] > 15
         if (indented or prev_short) and ends_sentence(prev.plain) and prev_short:
@@ -389,13 +431,19 @@ def _starts_with_mark(b: TBlock) -> bool:
     return first is not None and first.sup and is_note_mark(first.text)
 
 
+def _has_note_mark(b: TBlock) -> bool:
+    """A superscript note mark anywhere in the block: pdftext often runs several notes into
+    one block, so only the first of them starts with its mark."""
+    return any(r.sup and is_note_mark(r.text) for l in b.lines for r in l.runs)
+
+
 def _find_footnotes(live, bodyish, body, h):
     """Footnotes are the stack of blocks at the bottom of each column that are in
     smaller print than the body text or begin with a note mark."""
     found = set()
     # small print on a page with no note marks at all (copyright page, bibliography)
     # is not a footnote stack
-    if not any(_starts_with_mark(b) or PLAIN_LEAD_RE.match(b.lines[0].plain)
+    if not any(_has_note_mark(b) or PLAIN_LEAD_RE.match(b.lines[0].plain)
                for b in live if b.size <= body * 0.93 or _starts_with_mark(b)):
         return found
     for b in live:
@@ -441,6 +489,8 @@ PAGE_NUM_RE = re.compile(r"^\s*(page\s*)?(\d{1,4}|[ivxlcdm]{1,7})(\s*(of|/)\s*\d
 # "xii PREFACE" / "PREFACE xiii" / "112 The Moral Universe": page number plus running title
 HEAD_NUM = r"(?:\d{1,4}|[ivxlc]{1,7}|[IVXLC]{1,7})"
 RUNNING_HEAD_RE = re.compile(rf"^(?!\s*(?i:chapter|part|section|appendix|book|volume)\b)\s*(?:{HEAD_NUM}\s+[A-Za-z][^.!?]{{2,60}}|[A-Za-z][^.!?]{{2,60}}\s+{HEAD_NUM})\s*$")
+COPYRIGHT_LINE_RE = re.compile(r"^\s*©")
+TOP_HEAD_ZONE = 0.15  # running heads can sit lower than the strict margin zone
 BOILERPLATE_RE = re.compile(
     r"(downloaded from|all use subject to|this content downloaded|jstor\.org/terms|"
     r"for personal use only|copyright ©|©\s*\d{4}|doi\.org/10\.)", re.I)
@@ -479,7 +529,8 @@ def extract(pdf_path, progress=None) -> Extracted:
     for w, h, blocks in pages:
         seen = set()
         for b in blocks:
-            if len(b.lines) <= 2 and (b.y1 < h * MARGIN_ZONE or b.y0 > h * (1 - MARGIN_ZONE)):
+            if len(b.lines) <= 2 and (b.y1 < h * MARGIN_ZONE or b.y0 > h * (1 - MARGIN_ZONE)
+                                      or (b.y1 < h * TOP_HEAD_ZONE and b.size <= body * 1.02)):
                 seen.add(_norm_margin_text(b.plain))
         margin_counts.update(seen)
     # alternating recto/verso headers appear on only about half the pages
@@ -499,10 +550,13 @@ def extract(pdf_path, progress=None) -> Extracted:
                 b.kind = "skip"
                 removed_margin += 1
                 continue
-            if not in_margin or len(b.lines) > 2:
+            if len(b.lines) > 2:
                 continue
-            if (PAGE_NUM_RE.match(t) or BOILERPLATE_RE.search(t)
-                    or (n >= 2 and re.search(r"\w", t) and margin_counts[_norm_margin_text(t)] >= repeat_min)):
+            in_head = b.y1 < h * TOP_HEAD_ZONE
+            if ((in_margin and (PAGE_NUM_RE.match(t) or BOILERPLATE_RE.search(t)))
+                    or ((b.y0 > h * (1 - TOP_HEAD_ZONE) or in_head) and COPYRIGHT_LINE_RE.match(t))
+                    or ((in_margin or (in_head and b.size <= body * 1.02)) and n >= 2 and re.search(r"\w", t)
+                        and margin_counts[_norm_margin_text(t)] >= repeat_min)):
                 b.kind = "skip"
                 removed_margin += 1
 
@@ -595,7 +649,8 @@ def extract(pdf_path, progress=None) -> Extracted:
                 starts = first is not None and (
                     (first.sup and is_note_mark(first.text))
                     or (re.match(r"^\s*\d{1,3}[.)]?\s+\S", l.plain) and l is not b.lines[0]
-                        and l.bbox[0] <= b.x0 + 12 and cur))
+                        and l.bbox[0] <= b.x0 + 12 and cur
+                        and ends_sentence("".join(r.text for x in cur for r in x.runs))))
                 if starts and cur:
                     out.append(Block("footnote", _lines_to_text(cur), b.page, 0, b.bbox))
                     cur = []
