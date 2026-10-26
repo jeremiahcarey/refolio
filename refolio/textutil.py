@@ -221,3 +221,69 @@ def normalize_spaces(text: str) -> str:
     text = text.replace("ﬀ", "ff").replace("ﬃ", "ffi").replace("ﬄ", "ffl")
     text = re.sub(r"(\w+)¬\s*(?=([a-z]\w*))", _mend_not_sign, text)  # OCR'd line-break hyphen
     return re.sub(r"[ \t]+", " ", text).strip()
+
+
+# --- scan noise ---------------------------------------------------------------------
+# The OCR layer of an old scan reads specks, stains and bleed-through on blank pages as
+# characters: "r-* V- >tr:", "' i ?*a ' s '.Ml-". Real text is mostly words.
+_TITLES = {"mr", "mrs", "ms", "dr", "st", "pp", "ed", "eds", "vol", "no", "ch", "chs", "ff", "sr", "jr", "vs",
+           "p", "op", "cf", "ie", "eg", "al", "et", "tr", "rev", "ibid", "loc", "viz"}
+_SHORT_WORDS = {"a", "i", "an", "as", "at", "be", "by", "do", "go", "he", "if", "in", "is", "it", "me", "my",
+                "no", "of", "on", "or", "so", "to", "up", "us", "we", "am", "ad"}
+_ROMAN_RE = re.compile(r"^[ivxlcdm]+$", re.I)
+_NUMERIC_RE = re.compile(r"\d{1,4}(?:[-–—,./:]\d{1,4})*")
+_LINK_RE = re.compile(r"(?:https?://|www\.)\S+|\S+@\S+\.\S+", re.I)
+_WORD_RE = re.compile(r"[A-Za-z]+(?:['’\-–—][A-Za-z]+)*")
+
+
+def _is_wordlike(tok: str) -> bool:
+    if _LINK_RE.match(tok.lstrip("(<[")):
+        return True
+    tok = re.sub(r"(?<=[.,;:!?”’\"')\]])\d{1,3}$", "", tok)  # a note mark glued on: 'civilization."1'
+    core = tok.strip("'’\"“”‘()[]{}.,;:!?—–-_*\\")
+    if not core:
+        return False
+    if _NUMERIC_RE.fullmatch(core):  # "7", "45-51", "155,160,161"
+        return True
+    if not _WORD_RE.fullmatch(core):
+        return False
+    letters = re.sub(r"[^A-Za-z]", "", core)
+    if len(letters) >= 3:
+        return bool(re.search(r"[aeiouyAEIOUY]", letters)) or bool(_ROMAN_RE.match(letters))
+    low = letters.lower()
+    if low in _TITLES or low in _SHORT_WORDS:
+        return True
+    # initials ("J. R. Lucas") and Roman numerals ("v", "II")
+    if len(letters) == 1 and letters.isupper() and tok.rstrip(",;:)").endswith("."):
+        return True
+    return bool(_ROMAN_RE.match(letters)) and (letters.isupper() or letters in {"v", "x"})
+
+
+def strip_scan_noise(text: str, keep_prefix: bool = False) -> str:
+    """Return `text` unchanged if it is mostly words and "" if it is mostly junk. With
+    `keep_prefix` (for headings), a real leading fragment is kept: "Part I _, - ' t" -> "Part I"."""
+    plain = re.sub(r"</?sup>|[*_#>\\]", " ", text)
+    toks = plain.split()
+    if not toks:
+        return text if "<sup>" in text else ""
+    flags = [_is_wordlike(t) for t in toks]
+    total = sum(len(t) for t in toks)
+    good = sum(len(t) for t, f in zip(toks, flags) if f)
+    # real text has something to say: a word of three letters, a link, or a number of two digits
+    # (strings of "i", "if" and "4" are what specks look like to an OCR engine)
+    has_content = "<sup>" in text or any(
+        f and (_LINK_RE.match(t.lstrip("(<[")) or len(re.sub(r"[^A-Za-z]", "", t)) >= 3
+               or len(re.sub(r"\D", "", t)) >= 2)
+        for t, f in zip(toks, flags))
+    if has_content and good >= 0.5 * total and (len(toks) == 1 or sum(not f for f in flags) <= 0.4 * len(toks)):
+        return text
+    if keep_prefix:
+        run = []
+        for t, f in zip(toks, flags):
+            if not f:
+                break
+            run.append(t)
+        if run and all(t[0].isupper() or t[0].isdigit() for t in run) \
+                and any(re.fullmatch(r"[A-Za-z]{3,}", t.strip(".,;:")) for t in run):
+            return " ".join(run)
+    return ""

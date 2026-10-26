@@ -432,3 +432,26 @@ def test_marker_footnote_fixes_in_html_and_by_box():
     blocks = []
     marker_backend._walk(page, 1, blocks, [], marker_backend._footnote_boxes(page, []))
     assert [b.kind for b in blocks] == ["para", "footnote", "footnote"]
+
+
+def test_scan_noise_is_dropped_but_real_text_survives():
+    from refolio.textutil import strip_scan_noise as clean
+    # what an OCR engine makes of specks and stains on a blank page
+    for junk in ("r-* V- >tr:", "' i ?*a ' s '.Ml-", "i IV . U-", "if. i if t.. >", "I", "4", "-.-n;",
+                 "•\" 1 1 wt*...; «... Pr.iTE . - > 4r"):
+        assert clean(junk) == "", junk
+    assert clean("Part I _, - ' t", keep_prefix=True) == "Part I"
+    assert clean("Part I _, - ' t") == ""
+    # real text: prose with glued marks and abbreviations, index entries, links, lone marks, headings
+    for real in ('our own civilization."1 One cannot ask. Then more text."2 Done.',
+                 "Exegesis, critical, 45-51, 60-2, 86-7, 90, 155,160,161,162",
+                 "Mr J. R. Lucas and Mr M. R. McLean kindly read the greater part.",
+                 "28. See chs. 4—5.", "Op. cit., pp. 112—13.", "<sup>*</sup>", "Notes",
+                 "American Dietetic Association, ‘Vegetarian Diets’ (http://www.eatright.org/cps/rde/xchg/ ada/hs.xsl)."):
+        assert clean(real) == real, real
+    blocks = [Block("heading", "Part I _, - ' t", 19, 2), Block("para", "' i ?*a ' s '.Ml-", 19),
+              Block("para", "Real prose about the argument.", 20)]
+    a = assemble(Extracted(blocks, 20))
+    assert "###### " not in a.markdown and "## Part I\n" in a.markdown
+    assert "?*a" not in a.markdown and "Real prose" in a.markdown
+    assert any("scanner noise" in w for w in a.warnings)

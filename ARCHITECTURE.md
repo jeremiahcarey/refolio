@@ -313,6 +313,10 @@ What's left over:
 - **Unmatched marks** stay as `<sup>N</sup>`, with a warning.
 - **Uncited notes** get labels after the cited ones, with a warning. The EPUB writer lists them at the end of the notes.
 
+### 8.2a Scan noise
+
+On a scanned book the text layer also covers blank pages, where specks, stains and bleed-through come out of the OCR engine as strings like `r-* V- >tr:`. Before linking, `assemble` runs every block through `strip_scan_noise`. A token counts as word-like if it is a word of three letters or more containing a vowel, a number or range ("45-51"), a link, a title or abbreviation ("Mr", "op.", "pp."), an initial or a Roman numeral. A block is dropped unless it has something to say (a word of three letters, a link or a two-digit number) and at least half its characters, and 60% of its tokens, are word-like. Headings may keep a real leading fragment ("Part I" followed by junk). The count is reported as a warning. Marker already drops such pages, so this mostly affects the built-in converter. Short garbled-caps text on real pages (a publisher's address in a bad scan) can be lost too; the threshold was calibrated on a 200-page scanned book and the DeGrazia paper, with no real prose blocks flagged.
+
 ### 8.3 Paragraph merging and hyphenation
 
 **Merging.** Two consecutive para (or quote) blocks are merged when `continues(prev, next)` holds. That means either of:
@@ -488,7 +492,7 @@ One page, two screens (home and review), routed with `location.hash` (`#/` and `
 
 ## 13. Tests
 
-`tests/test_pipeline.py` has 29 tests and runs in about 15 seconds when EPUBCheck is cached (it was about 75 seconds on a cold JVM).
+`tests/test_pipeline.py` has 30 tests and runs in about 15 seconds when EPUBCheck is cached (it was about 75 seconds on a cold JVM).
 
 | Area               | Tests                                                                                                                                                                                                                                                                                                                                                                        |
 | ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

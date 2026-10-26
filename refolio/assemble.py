@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 
 from .model import Block, Extracted
 from .textutil import (OCR_MARK_CHARS, SUP_RE, continues, is_note_mark, join_hyphenated, ocr_digits,
-                       ocr_number_pattern)
+                       ocr_number_pattern, strip_scan_noise)
 
 LEAD_MARK_RE = re.compile(r"^\s*(?:<sup>\s*([^<]+?)\s*</sup>|(\d{1,3})[.)]?\s+(?=\S)|([†‡§¶]+|\*+(?=\s))\s*)")
 
@@ -177,8 +177,17 @@ def _promote_plain_marks(notes: list[Note], body: list[Block]) -> int:
 
 def assemble(ex: Extracted) -> Assembled:
     warnings = list(ex.warnings)
-    notes = _collect_notes(ex.blocks)
-    body = [b for b in ex.blocks if b.kind != "footnote"]
+    blocks, dropped = [], 0
+    for b in ex.blocks:  # specks on a blank scanned page come out of OCR as nonsense characters
+        text = strip_scan_noise(b.text, keep_prefix=b.kind == "heading")
+        if not text:
+            dropped += 1
+            continue
+        blocks.append(b if text == b.text else Block(b.kind, text, b.page, b.level, b.bbox))
+    if dropped:
+        warnings.append(f"Dropped {dropped} block(s) of scanner noise (specks and stains read as text).")
+    notes = _collect_notes(blocks)
+    body = [b for b in blocks if b.kind != "footnote"]
 
     # merge paragraphs split by column / page breaks
     merged: list[Block] = []
