@@ -34,8 +34,11 @@ def data_dir() -> Path:
     d = Path.home() / "Library" / "Application Support" / "Refolio"
     old = Path.home() / "Library" / "Application Support" / "Earmark"  # the app's former name
     if not (Path.home() / "Library").exists():  # not macOS
-        d = Path.home() / ".refolio"
         old = Path.home() / ".earmark"
+        d = Path.home() / ".refolio"
+        if not d.exists() and not old.exists():  # new installs use the platform's usual place
+            from platformdirs import user_data_dir
+            d = Path(user_data_dir("Refolio", appauthor=False))
     if old.exists() and not d.exists():
         old.rename(d)
     (d / "projects").mkdir(parents=True, exist_ok=True)
@@ -118,7 +121,9 @@ class ExportBody(BaseModel):
 LOCAL_HOSTS = {"127.0.0.1", "localhost", "[::1]"}
 
 
-def create_app() -> FastAPI:
+def create_app(save_file=None) -> FastAPI:
+    """`save_file(name, data) -> str | None` lets a desktop shell show its own save dialog
+    (blocking, returns the saved path or None if cancelled); browsers just download."""
     app = FastAPI(title="Refolio", version=__version__)
 
     @app.middleware("http")
@@ -142,6 +147,7 @@ def create_app() -> FastAPI:
         avail = available_engines()
         return {
             "version": __version__,
+            "native_save": save_file is not None,
             "engines": [{"id": k, "label": v, "available": avail[k]} for k, v in ENGINES.items()],
             "footnote_modes": [{"id": k, "label": v} for k, v in FOOTNOTE_MODES.items()],
             "cleanup": [{"id": k, "label": v[0], "short": v[1], "group": v[2]}
@@ -266,19 +272,31 @@ def create_app() -> FastAPI:
         r = build_epub(body.markdown, body.mode)
         return {"html": r.body_html, "warnings": r.warnings}
 
-    @app.post("/api/projects/{pid}/export")
-    def export(pid: str, body: ExportBody):
+    def _export(pid: str, body: ExportBody):
         p = _proj(pid)
         (p / "document.md").write_text(body.markdown)
         r = build_epub(body.markdown, body.mode, title=body.title, author=body.author)
         name = (body.title or _read_meta(p).get("name") or "document").strip()
         name = re.sub(r"[^\w\s\-.,'()]+", "", name).strip()[:90] or "document"
         name = re.sub(r"\.pdf$", "", name, flags=re.I)
+        return r, name
+
+    @app.post("/api/projects/{pid}/export")
+    def export(pid: str, body: ExportBody):
+        r, name = _export(pid, body)
         from urllib.parse import quote
         return Response(r.data, media_type="application/epub+zip", headers={
             "Content-Disposition": f"attachment; filename=\"{name}.epub\"; filename*=UTF-8''{quote(name)}.epub",
             "X-Refolio-Warnings": quote(json.dumps(r.warnings)),
         })
+
+    @app.post("/api/projects/{pid}/export-save")
+    def export_save(pid: str, body: ExportBody):
+        if save_file is None:
+            raise HTTPException(404, "No native save dialog available.")
+        r, name = _export(pid, body)
+        path = save_file(f"{name}.epub", r.data)
+        return {"saved": path, "name": Path(path).name if path else None, "warnings": r.warnings}
 
     @app.exception_handler(Exception)
     async def errors(request, exc):

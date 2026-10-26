@@ -63,7 +63,8 @@ function engineChoices(container, name, selected) {
   for (const e of state.info.engines) {
     const label = document.createElement("label");
     if (!e.available) label.classList.add("off");
-    const desc = e.available ? ENGINE_DESC[e.id] :
+    const desc = e.available ? ENGINE_DESC[e.id] : state.info.native_save ?
+      'Not included in this app. To use it, install Refolio from the Terminal instead; see the README.' :
       'Not installed. To add it, run <code>pip install "refolio[marker]"</code> and restart Refolio.';
     label.innerHTML = `<input type="radio" name="${name}" value="${e.id}" ${e.available ? "" : "disabled"}
       ${e.id === selected ? "checked" : ""}><span>${escapeHtml(e.label)}</span><span class="desc">${desc}</span>`;
@@ -584,20 +585,27 @@ $("#export-form").onsubmit = async (e) => {
   $("#ex-go").disabled = true;
   $("#ex-msg").textContent = "Building…";
   try {
-    const res = await api(`/api/projects/${state.doc.id}/export`, {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ markdown: text, mode, title, author }),
-    });
-    const blob = await res.blob();
-    const cd = res.headers.get("Content-Disposition") || "";
-    const name = decodeURIComponent((cd.match(/filename\*=UTF-8''([^;]+)/) || [])[1] || "document.epub");
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = name;
-    document.body.appendChild(a);
-    a.click();
-    setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 2000);
-    const warns = JSON.parse(decodeURIComponent(res.headers.get("X-Refolio-Warnings") || "%5B%5D"));
+    const payload = { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ markdown: text, mode, title, author }) };
+    let name, warns;
+    if (state.info?.native_save) {
+      // the desktop app shows its own save dialog; WebViews can't be trusted to download blobs
+      const r = await (await api(`/api/projects/${state.doc.id}/export-save`, payload)).json();
+      if (!r.saved) { $("#ex-msg").textContent = ""; return; }
+      name = r.name; warns = r.warnings;
+    } else {
+      const res = await api(`/api/projects/${state.doc.id}/export`, payload);
+      const blob = await res.blob();
+      const cd = res.headers.get("Content-Disposition") || "";
+      name = decodeURIComponent((cd.match(/filename\*=UTF-8''([^;]+)/) || [])[1] || "document.epub");
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = name;
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 2000);
+      warns = JSON.parse(decodeURIComponent(res.headers.get("X-Refolio-Warnings") || "%5B%5D"));
+    }
     $("#export-dlg").close();
     toast(`Exported “${name}”.` + (warns.length ? " " + warns[0] : ""));
   } catch (err) {

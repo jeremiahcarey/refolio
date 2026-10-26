@@ -6,3 +6,5 @@ build/
 *.egg-info/
 .pytest_cache/
 .DS_Store
+.briefcase/
+*.dist-info/

@@ -31,11 +31,14 @@ dependencies = [
   "uvicorn>=0.29",
   "python-multipart>=0.0.9",
   "pillow>=10",
+  "platformdirs>=3",
 ]
 
 [project.optional-dependencies]
 marker = ["marker-pdf>=2.0"]
 dev = ["pytest>=8", "httpx>=0.27", "epubcheck>=5"]
+# the desktop window; the installers bundle it, `uv tool install` users don't need it
+desktop = ["toga>=0.5"]
 
 [project.scripts]
 refolio = "refolio.cli:main"
@@ -48,3 +51,44 @@ packages = ["refolio"]
 
 [tool.hatch.build.targets.sdist]
 exclude = ["tests/fixtures/*.pdf"]
+
+# Desktop installers: `briefcase create|build|package <macOS|windows|linux>`. See README.
+[tool.briefcase]
+project_name = "Refolio"
+bundle = "com.jeremiahcarey"
+version = "0.1.0"  # keep in step with [project] and refolio/__init__.py
+url = "https://github.com/jeremiahcarey/refolio"
+author = "Jeremiah Carey"
+author_email = "jeremiah.a.carey@gmail.com"
+
+[tool.briefcase.app.refolio]
+formal_name = "Refolio"
+description = "Turn PDFs of papers into clean EPUBs for listening."
+icon = "refolio/resources/refolio"
+sources = ["refolio"]
+test_sources = []
+requires = [
+  "pdftext>=0.7,<0.8",
+  "pypdf>=4",
+  "pypdfium2>=4.30",
+  "markdown-it-py>=3.0",
+  "fastapi>=0.110",
+  "uvicorn>=0.29",
+  "python-multipart>=0.0.9",
+  "pillow>=10",
+  "platformdirs>=3",
+]
+
+[tool.briefcase.app.refolio.macOS]
+universal_build = true
+requires = ["toga-cocoa~=0.5"]
+
+[tool.briefcase.app.refolio.windows]
+requires = ["toga-winforms~=0.5"]
+
+[tool.briefcase.app.refolio.linux]
+requires = ["toga-gtk~=0.5"]
+
+[tool.briefcase.app.refolio.linux.system.debian]
+system_requires = ["libgirepository1.0-dev", "libcairo2-dev", "libwebkit2gtk-4.1-dev"]
+system_runtime_requires = ["libwebkit2gtk-4.1-0", "gir1.2-webkit2-4.1"]

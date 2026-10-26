@@ -57,6 +57,7 @@ Four principles shaped almost every decision:
 | Images                  | Pillow                                                                                 | ≥ 10                       | MIT-CMU                                      | PNG encoding of rendered pages                                                                                    |
 | Front end               | Vanilla JS, CSS, HTML                                                                  | —                          | —                                            | No build step, works offline, easy for contributors                                                               |
 | Packaging               | hatchling; [uv](https://docs.astral.sh/uv/) for installs                               | —                          | —                                            | uv downloads its own Python, so end users need nothing preinstalled                                               |
+| Desktop installers      | [Briefcase](https://briefcase.readthedocs.io/) + [Toga](https://toga.readthedocs.io/) (WebView) | 0.4 / 0.5                  | BSD                                          | Point-and-click `.dmg` / `.msi` / `.deb` with no terminal; the window is a WebView on the same local server       |
 | Validation (dev)        | [EPUBCheck](https://www.w3.org/publishing/epubcheck/) via the `epubcheck` PyPI wrapper | 5.x                        | BSD                                          | The reference validator for EPUB. Needs Java.                                                                     |
 | Tests (dev)             | pytest, httpx                                                                          | —                          | —                                            | —                                                                                                                 |
 
@@ -84,7 +85,10 @@ refolio/
 │   ├── epub.py                Refolio Markdown → EPUB 3 (four footnote modes)
 │   ├── cleanup.py             one-click Markdown transformations
 │   ├── server.py              FastAPI app: projects, conversion jobs, page images, export
-│   ├── cli.py                 `refolio` (GUI), `refolio convert`, `refolio build`
+│   ├── cli.py                 `refolio` (browser), `refolio convert`, `refolio build`
+│   ├── app.py                 desktop shell: Toga window + WebView on the local server (Briefcase entry)
+│   ├── __main__.py            `python -m refolio` / Briefcase launch the desktop shell
+│   ├── resources/             app icons (png/icns/ico) for Briefcase
 │   └── static/                index.html, app.css, app.js, icon.svg
 ├── tests/
 │   ├── test_pipeline.py       17 tests: converters, assembly, EPUB, cleanup, web API
@@ -93,7 +97,8 @@ refolio/
 │       └── *.pdf              three layouts, original filler text
 ├── Refolio.command            macOS launcher (built-in converter)
 ├── Refolio with Marker.command  macOS launcher (+ Marker extra)
-├── .github/workflows/tests.yml  CI: Ubuntu + macOS, Python 3.12, Java 21
+├── .github/workflows/tests.yml    CI: Ubuntu + macOS + Windows, Python 3.12, Java 21
+├── .github/workflows/release.yml  builds the Briefcase installers for all three platforms
 ├── pyproject.toml, README.md, ARCHITECTURE.md, LICENSE (Apache-2.0)
 ```
 
@@ -418,12 +423,12 @@ Documents are handled as blocks separated by blank lines. Front matter is held a
 
 ### 11.1 Server (`server.py`)
 
-`create_app()` returns a FastAPI app. `cli.serve()` runs it on **127.0.0.1** with Uvicorn.
+`create_app(save_file=None)` returns a FastAPI app. `cli.serve()` runs it on **127.0.0.1** with Uvicorn and opens the browser; the desktop shell (§12) runs the same app on a background thread and passes `save_file`, a callback that shows a native save dialog.
 
 | Method & path                             | Purpose                                                                                                                                                        |
 | ----------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `GET /`                                   | `static/index.html`                                                                                                                                            |
-| `GET /api/info`                           | Version, engines with availability, footnote modes, cleanup ops                                                                                                |
+| `GET /api/info`                           | Version, `native_save` (true only in the desktop shell), engines with availability, footnote modes, cleanup ops                                                |
 | `GET /api/projects`                       | 30 most recent projects (title or file name, updated time)                                                                                                     |
 | `POST /api/projects`                      | Multipart upload (`file`, `engine`, `allow_ocr`). Checks the `%PDF` magic number and that PDFium can open the file, then queues conversion and returns `{id}`. |
 | `POST /api/projects/{id}/reconvert`       | Re-run with another engine. This overwrites `document.md`.                                                                                                     |
@@ -432,11 +437,12 @@ Documents are handled as blocks separated by blank lines. Front matter is held a
 | `DELETE /api/projects/{id}`               | Remove the project folder                                                                                                                                      |
 | `GET /api/projects/{id}/pages/{n}.png?w=` | Render the page at a width, clamped to 300–2000 px. Cached on disk.                                                                                            |
 | `GET /api/projects/{id}/source.pdf`       | The original PDF                                                                                                                                               |
+| `POST /api/projects/{id}/export-save`     | Same build as `export`, but hands the bytes to the shell's `save_file` dialog and returns `{saved, name, warnings}`. 404 outside the desktop shell; `saved` is null if cancelled. |
 | `POST /api/cleanup`                       | `{op, markdown}` → `{markdown, count}`                                                                                                                         |
 | `POST /api/preview`                       | `{markdown, mode}` → `{html, warnings}`. This is the full EPUB build; only the body HTML is returned.                                                          |
 | `POST /api/projects/{id}/export`          | Saves the Markdown, builds the EPUB, streams it back. Filename in RFC 5987 `filename*`. Warnings in the `X-Refolio-Warnings` header.                           |
 
-**Storage.** Data lives in `~/Library/Application Support/Refolio/projects/<12-hex id>/` on macOS and `~/.refolio/projects/…` elsewhere:
+**Storage.** Data lives in `~/Library/Application Support/Refolio/projects/<12-hex id>/` on macOS. Elsewhere it is `~/.refolio/projects/…` if that already exists, otherwise the platform's usual user-data directory from `platformdirs` (`%LOCALAPPDATA%\Refolio` on Windows, `~/.local/share/Refolio` on Linux):
 
 ```
 source.pdf
@@ -491,7 +497,13 @@ One page, two screens (home and review), routed with `location.hash` (`#/` and `
   - `dev` → pytest, httpx, epubcheck.
 - **macOS launchers.** `Refolio.command` installs uv if needed, then runs `uv run --python 3.12 --project . refolio`. The first run creates `.venv` in the folder. The Marker variant adds `--extra marker` and warns if `llama-server` is missing.
   - Python is pinned to 3.12 because it's the version Marker's dependency tree resolves cleanly on. This was checked for `aarch64-apple-darwin` with `uv pip compile`.
-- **Gatekeeper.** The `.command` files aren't signed. On macOS 15 and later, users must either click "Open Anyway" in Privacy & Security or run `bash Refolio.command` from Terminal; the README covers both. A signed and notarised `.app` (see §17) would remove this friction.
+- **Desktop app (Briefcase).** `[tool.briefcase]` in `pyproject.toml` builds `.dmg`, `.msi` and `.deb` installers; it's additive, and the CLI path above is unchanged.
+  - `refolio/app.py` is a `toga.App`. `startup()` picks a free port (reusing `cli._free_port`), runs `uvicorn.Server` on a daemon thread, waits for the port, then shows a `toga.WebView` on `http://127.0.0.1:<port>/`. `on_exit` sets `should_exit`. The Host/Origin middleware needs no change, since the WebView loads the same origin.
+  - **Exports.** WebViews don't reliably handle blob downloads, so when `/api/info` reports `native_save`, `app.js` posts to `/export-save`. The server thread calls `save_file`, which schedules a `SaveFileDialog` on the UI loop (`run_coroutine_threadsafe`) and blocks until it's answered. In a normal browser the original blob download is used.
+  - **Contents.** The bundle has the built-in converter only. Marker is not included: the app has its own private Python, so a separate `pip install "refolio[marker]"` is invisible to it, and the UI says so (`engineChoices` in `app.js`). Marker users install from the terminal.
+  - **Requires.** Dependencies are listed twice, in `[project]` and `[tool.briefcase.app.refolio]`, and the version in three places (`pyproject.toml` twice, `__init__.py`). Keep them in step. Toga is the `desktop` extra and a per-platform Briefcase requirement (`toga-cocoa`, `toga-winforms`, `toga-gtk`).
+  - **Build.** Briefcase can't cross-compile, so `release.yml` builds each platform on its own runner. macOS is ad-hoc signed in CI; the public build is signed with a Developer ID and notarised locally (`briefcase package macOS --identity …`). Windows is unsigned. Linux needs WebKitGTK (`libwebkit2gtk-4.1`).
+- **Gatekeeper.** The `.command` files aren't signed. On macOS 15 and later, users must either click "Open Anyway" in Privacy & Security or run `bash Refolio.command` from Terminal; the README covers both. The signed and notarised Briefcase `.dmg` above removes this friction.
 
 ## 13. Tests
 
@@ -606,7 +618,7 @@ Ranked roughly by how likely they are to bite.
 - **Ideas with good value for effort:**
   - Wire `drop_pages` to a page-range input ("drop pages 1–2"), for cover sheets that aren't JSTOR.
   - "Scanned PDF?" detection with a nudge to Marker.
-  - A signed and notarised `.app` (py2app or PyInstaller plus an Apple Developer ID) to get rid of the Gatekeeper dance.
+  - Marker inside the desktop app. Options: a runtime-installed environment on `sys.path` (blocked by macOS library validation unless an entitlement is added), or a sidecar `refolio` server from a Marker-enabled environment that the window points at.
   - A "Send to ElevenReader" folder watcher, or export straight into a synced folder.
   - Per-publisher profiles: JSON overrides for margins, note size and heading rules, picked automatically by matching boilerplate text.
   - An optional LLM pass, opt-in and run through the same Markdown, for one-click fixes like "rejoin this page" or "is this a footnote?".

@@ -36,9 +36,13 @@ Everything runs on your computer. Nothing is uploaded.
 
 ![Refolio's review screen: the editable text on the left, the original PDF page on the right](docs/screenshot.png)
 
-## Install and run on a Mac (instructions for other platforms coming soon)
+## Install and run
 
-**Easiest:** download this folder and double-click **`Refolio.command`**.
+**Point and click:** download the installer for your system from the [Releases page](https://github.com/jeremiahcarey/refolio/releases) (a `.dmg` for Mac, an `.msi` for Windows, a `.deb` for Debian/Ubuntu), then open Refolio like any other app. Windows will warn that the publisher is unknown; choose **More info → Run anyway**. The installers include the built-in converter only; for Marker, use the terminal install below.
+
+### From the terminal (and for Marker)
+
+**Easiest on a Mac:** download this folder and double-click **`Refolio.command`**.
 
 - The first time, macOS may say it can't verify the developer. If so, right-click the file, choose **Open**, then **Open** again. You only have to do this once.
 - The first run spends a minute or two installing what it needs: [uv](https://docs.astral.sh/uv/), which brings its own Python.
@@ -149,6 +153,15 @@ How it fits together:
 | `refolio/server.py`, `refolio/static/` | The local web app (FastAPI and plain JavaScript, no build step)                                          |
 
 Bug reports are most useful with the PDF attached, or at least a screenshot of the page that went wrong.
+
+## Building the installers
+
+```sh
+uv tool install briefcase
+briefcase create macOS && briefcase build macOS && briefcase package macOS --identity "Developer ID Application: Your Name (TEAMID)"
+```
+
+Use `windows` or `linux` in place of `macOS` on those systems (Briefcase can't cross-compile; the `release` workflow builds all three). `briefcase dev` runs the desktop window straight from the source tree. For the first notarized build, store credentials once with `xcrun notarytool store-credentials`.
 
 ## License
 
