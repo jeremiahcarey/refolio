@@ -1,6 +1,7 @@
 """Text helpers shared by the converters and the cleanup tools."""
 from __future__ import annotations
 
+import itertools
 import re
 
 # Prefixes that usually keep their hyphen when a line breaks after them
@@ -166,6 +167,63 @@ def word_set(text: str) -> set[str]:
     return words
 
 
+_LIG_CODES = '!"#$%&'
+_LIG_CLASS = re.escape(_LIG_CODES)
+# an opening quote may sit right before the ligature: `"#e metaphysical` is "The metaphysical
+_LIG_TOKEN_RE = re.compile(rf'(?<![A-Za-z0-9])(?P<q>")?(?P<tok>[A-Za-z]*(?:[{_LIG_CLASS}][A-Za-z]*)+)(?![A-Za-z0-9])')
+# a word broken after a hyphen at a line end, the next line opening with the ligature: "justi- !ed"
+_LIG_BREAK_RE = re.compile(rf"(?<![A-Za-z])([A-Za-z]+)-[ \t{LINE_BREAK}]+([{_LIG_CLASS}][A-Za-z]*)(?![A-Za-z0-9])")
+_LIG_GHOST_RE = re.compile(rf"(?<![A-Za-z])(?P<head>[A-Za-z]*)[{_LIG_CLASS}][ \t{LINE_BREAK}]+(?P<tail>[a-z]+)(?![A-Za-z])")
+_LIG_START = ("Th", "fi", "ff", "fl", "ffi", "ffl")
+_LIG_INNER = ("ffi", "ffl", "fi", "fl", "ff", "Th")
+
+
+def repair_ligature_codes(text: str, plain: set[str]) -> str:
+    """A text extractor that can't read a PDF's ligature font returns the glyph's character
+    code, one that changes from page to page: "justi!ed", "o$er", "#e" for justified, offer, The.
+    Put a ligature back where that gives a word in the lexicon and the code alone does not."""
+    def expand(tok: str, first_is_start: bool) -> str | None:
+        pieces = re.split(f"[{_LIG_CLASS}]", tok)
+        k = len(pieces) - 1
+        if k < 1 or k > 2 or not any(pieces):
+            return None
+        for combo in itertools.product(*[(_LIG_START if (i == 0 and first_is_start and not pieces[0]) else _LIG_INNER)
+                                         for i in range(k)]):
+            cand = pieces[0] + "".join(c + pieces[i + 1] for i, c in enumerate(combo))
+            if len(cand) > 2 and cand.lower() in plain:
+                return cand
+        return None
+
+    def fix(m: re.Match) -> str:
+        tok = m.group("tok")
+        if tok.lower() in plain:
+            return m.group(0)
+        cand = expand(tok, True)
+        return (m.group("q") or "") + cand if cand else m.group(0)
+
+    def join(m: re.Match) -> str:
+        head, tail = m.groups()
+        pieces = re.split(f"[{_LIG_CLASS}]", tail)
+        for c in _LIG_INNER:
+            if (head + c + pieces[-1]).lower() in plain:
+                return head + c + pieces[-1]
+        return m.group(0)
+
+    def ghost(m: re.Match) -> str:
+        head, tail = m.group("head"), m.group("tail")
+        for c in (_LIG_START if not head else _LIG_INNER):
+            if (head + c + tail).lower() in plain:
+                return head + c + tail
+        return m.group(0)
+
+    # a ligature that is an italic run of its own: "*!**e Routledge*" -> "*!e Routledge*"
+    text = re.sub(rf"\*([{_LIG_CLASS}])\*\*(?=[A-Za-z])", r"*\1", text)
+    text = _LIG_BREAK_RE.sub(join, text)
+    # the extractor's space after the ligature: "justi! cation"
+    text = _LIG_GHOST_RE.sub(ghost, text)
+    return _LIG_TOKEN_RE.sub(fix, text)
+
+
 def mend_split_words(text: str, words: set[str]) -> str:
     """Repair words that a converter split in two, or glued where it should not have:
     a ligature's ghost space ("Th is", "qualifi ed"), a line-break hyphen it dropped
@@ -176,6 +234,7 @@ def mend_split_words(text: str, words: set[str]) -> str:
     half is not a word, the first ends in a ligature ("Th", "ff"), or the break is a line
     break and neither half is a common small word. So "off the" and "any one" stay apart."""
     plain = {w for w in words if "-" not in w}
+    text = repair_ligature_codes(text, plain)
     glued = {w.replace("-", ""): w for w in words if "-" in w}
     stems = {_stem(w) for w in plain}
 

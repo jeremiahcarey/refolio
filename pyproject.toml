@@ -24,6 +24,7 @@ classifiers = [
 ]
 dependencies = [
   "pdftext>=0.7,<0.8",
+  "pypdf>=4",
   "pypdfium2>=4.30",
   "markdown-it-py>=3.0",
   "fastapi>=0.110",

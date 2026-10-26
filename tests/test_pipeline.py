@@ -455,3 +455,30 @@ def test_scan_noise_is_dropped_but_real_text_survives():
     assert "###### " not in a.markdown and "## Part I\n" in a.markdown
     assert "?*a" not in a.markdown and "Real prose" in a.markdown
     assert any("scanner noise" in w for w in a.warnings)
+
+
+def test_ligature_font_codes_are_read_from_glyph_names():
+    # a PDF's ligature subset numbers its glyphs per page: "!" is fi here, Th on another page
+    assert builtin._glyph_text("f_f_i") == "ffi" and builtin._glyph_text("T_h") == "Th"
+    assert builtin._glyph_text("onehalf") == "½" and builtin._glyph_text("uni00A0") == " "
+    assert builtin._glyph_text("A") is None
+    table = {"!": "fi", "#": "Th"}
+    wide = {"char": "!", "bbox": [10.0, 0.0, 16.5, 10.0]}
+    span = {"text": "!", "chars": [wide]}
+    builtin._fix_ligature_span(span, table)
+    assert span["text"] == "fi" and span["chars"][0]["char"] == "fi"
+    narrow = {"text": "!", "chars": [{"char": "!", "bbox": [10.0, 0.0, 12.5, 10.0]}]}  # a real "!"
+    builtin._fix_ligature_span(narrow, table)
+    assert narrow["text"] == "!"
+
+
+def test_marker_ligature_codes_are_repaired_from_the_lexicon():
+    from refolio.textutil import mend_split_words, word_set
+    words = word_set("The justified justification offer offers affirming difficult The Theory theistic "
+                     "significance qualification a&b")
+    fix = lambda t: mend_split_words(t, words)
+    assert fix('"e justi!ed claim o$er a#rming di"cult') == "The justified claim offer affirming difficult"
+    assert fix("justi! cation, signi# cance and justi- !ed") == "justification, significance and justified"
+    assert fix('the *!**eory* of "#e theistic') == 'the *Theory* of "The theistic'
+    # real punctuation is left alone
+    assert fix('a&b, "quoted" text! and 100% sure, #1') == 'a&b, "quoted" text! and 100% sure, #1'

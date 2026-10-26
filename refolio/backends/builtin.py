@@ -242,17 +242,95 @@ def _split_centred(tb: TBlock, w: float) -> list[TBlock]:
     return out
 
 
+_LIGATURE_NAMES = {"fi": "fi", "fl": "fl", "ff": "ff", "ffi": "ffi", "ffl": "ffl", "Th": "Th", "ft": "ft",
+                   "onehalf": "½", "onequarter": "¼", "threequarters": "¾"}
+
+
+def _glyph_text(name: str) -> str | None:
+    """The text a glyph name stands for, for the glyphs a text extractor tends to lose:
+    ligatures ("f_f_i", "T_h"), fractions and "uniXXXX" names."""
+    if name in _LIGATURE_NAMES:
+        return _LIGATURE_NAMES[name]
+    parts = name.split("_")
+    if len(parts) > 1 and all(len(p) == 1 and p.isalpha() for p in parts):
+        return "".join(parts)
+    m = re.fullmatch(r"uni([0-9A-Fa-f]{4})", name)
+    return chr(int(m.group(1), 16)) if m else None
+
+
+def _ligature_maps(pdf_path) -> dict[int, dict[str, dict[str, str]]]:
+    """page index -> font name -> {character code: text}, read from the fonts' encodings.
+
+    Many typesetters put the ligatures (fi, ff, ffi, Th ...) in a font subset of their own and
+    number its glyphs per page: code "!" is "fi" on one page and "Th" on the next. A PDF viewer
+    copies them as "fi" and "Th" from the glyph names, but pdfium returns the raw code, so
+    "justified" reads "justi!ed" and "The" reads "#e"."""
+    try:
+        from pypdf import PdfReader
+        reader = PdfReader(str(pdf_path))
+    except Exception:
+        return {}
+    out: dict[int, dict[str, dict[str, str]]] = {}
+    for pi, page in enumerate(reader.pages):
+        try:
+            fonts = (page.get("/Resources") or {}).get("/Font") or {}
+            for ref in fonts.get_object().values():
+                font = ref.get_object()
+                enc = font.get("/Encoding")
+                enc = enc.get_object() if hasattr(enc, "get_object") else enc
+                diffs = enc.get("/Differences") if hasattr(enc, "get") else None
+                if not diffs:
+                    continue
+                code, table = 0, {}
+                for item in diffs:
+                    item = item.get_object() if hasattr(item, "get_object") else item
+                    if isinstance(item, int):
+                        code = int(item)
+                        continue
+                    text = _glyph_text(str(item).lstrip("/"))
+                    if text and text.strip():
+                        table[chr(code)] = text
+                    code += 1
+                base = re.sub(r"^[A-Z]{6}\+", "", str(font.get("/BaseFont", "")).lstrip("/"))
+                if table and base:
+                    out.setdefault(pi, {}).setdefault(base, {}).update(table)
+        except Exception:
+            continue
+    return out
+
+
+def _fix_ligature_span(span, table: dict[str, str]) -> None:
+    """Replace a span that is only ligature glyphs by the text they stand for. A real "!" is a
+    narrow glyph; a ligature is wide (at least ~0.4 of the line height), which tells them apart."""
+    chars = [c for c in span.get("chars") or () if c["char"] not in "\r\n"]
+    if not chars or len(chars) > 3 or any(c["char"] not in table for c in chars):
+        return
+    if any((c["bbox"][2] - c["bbox"][0]) < 0.35 * _char_h(c) for c in chars):
+        return
+    text = "".join(table[c["char"]] for c in chars)
+    bb = [min(c["bbox"][0] for c in chars), min(c["bbox"][1] for c in chars),
+          max(c["bbox"][2] for c in chars), max(c["bbox"][3] for c in chars)]
+    span["text"] = text
+    span["chars"] = [{**chars[0], "char": text, "bbox": bb}]
+
+
 def _read_pages(pdf_path):
     from pdftext.extraction import dictionary_output
 
     pages = dictionary_output(str(pdf_path), keep_chars=True, disable_links=True)
+    ligatures = _ligature_maps(pdf_path)
     out = []
     for pi, page in enumerate(pages):
         blocks = []
+        lig_fonts = ligatures.get(pi, {})
         for b in page["blocks"]:
             lines = []
             for l in b["lines"]:
                 runs = []
+                for s in l["spans"]:
+                    table = lig_fonts.get(s["font"].get("name") or "")
+                    if table:
+                        _fix_ligature_span(s, table)
                 sizes = [s["font"].get("size") or 0 for s in l["spans"] if s["text"].strip()]
                 main = max(sizes) if sizes else 0
                 heights = [h for s in l["spans"] for c in s.get("chars") or ()
@@ -491,6 +569,7 @@ HEAD_NUM = r"(?:\d{1,4}|[ivxlc]{1,7}|[IVXLC]{1,7})"
 RUNNING_HEAD_RE = re.compile(rf"^(?!\s*(?i:chapter|part|section|appendix|book|volume)\b)\s*(?:{HEAD_NUM}\s+[A-Za-z][^.!?]{{2,60}}|[A-Za-z][^.!?]{{2,60}}\s+{HEAD_NUM})\s*$")
 COPYRIGHT_LINE_RE = re.compile(r"^\s*©")
 TOP_HEAD_ZONE = 0.15  # running heads can sit lower than the strict margin zone
+BARE_NUMBER_RE = re.compile(r"[\dIVXLivxl.\s]+")  # a chapter number set large above its title
 BOILERPLATE_RE = re.compile(
     r"(downloaded from|all use subject to|this content downloaded|jstor\.org/terms|"
     r"for personal use only|copyright ©|©\s*\d{4}|doi\.org/10\.)", re.I)
@@ -564,7 +643,8 @@ def extract(pdf_path, progress=None) -> Extracted:
         progress(0.6, "Finding footnotes and headings")
 
     heading_sizes = sorted({b.size for _, _, bl in pages for b in bl
-                            if b.kind != "skip" and b.size >= body * 1.15 and len(b.lines) <= 3},
+                            if b.kind != "skip" and b.size >= body * 1.15 and len(b.lines) <= 3
+                            and not BARE_NUMBER_RE.fullmatch(b.plain)},
                            reverse=True)
     title = ""
     author = ""
@@ -579,6 +659,9 @@ def extract(pdf_path, progress=None) -> Extracted:
                 b.kind = "footnote"
                 continue
             words = len(b.plain.split())
+            if b.size >= body * 1.15 and BARE_NUMBER_RE.fullmatch(b.plain):
+                b.kind = "skip"
+                continue
             if b.size >= body * 1.15 and len(b.lines) <= 3 and words <= 30:
                 b.kind = "heading"
                 b.level = 1 + heading_sizes.index(b.size)
@@ -610,7 +693,7 @@ def extract(pdf_path, progress=None) -> Extracted:
         ordered = xy_cut(live)
         notes = [b for b in ordered if b.kind == "footnote"]
         for b in ordered:
-            if b.kind == "footnote":
+            if b.kind in ("footnote", "skip"):
                 continue
             if b.kind == "heading":
                 text = _lines_to_text(b.lines, allow_italic=False).replace("**", "")
