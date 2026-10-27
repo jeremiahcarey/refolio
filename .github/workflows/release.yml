@@ -9,18 +9,24 @@ on:
 jobs:
   package:
     strategy:
+      fail-fast: false
       matrix:
         include:
-          - { os: windows-latest, platform: windows, args: "" }
-          - { os: ubuntu-latest, platform: linux, args: "" }
+          - { os: windows-latest, platform: windows, target: "" }
+          - { os: ubuntu-24.04, platform: linux, target: "--target ubuntu:24.04" }
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
       - run: uv tool install briefcase
-      - run: briefcase create ${{ matrix.platform }} --no-input
-      - run: briefcase build ${{ matrix.platform }} --no-input
-      - run: briefcase package ${{ matrix.platform }} --no-input ${{ matrix.args }}
+      - run: briefcase create ${{ matrix.platform }} ${{ matrix.target }} --no-input
+      - run: briefcase build ${{ matrix.platform }} ${{ matrix.target }} --no-input
+      - run: briefcase package ${{ matrix.platform }} ${{ matrix.target }} --no-input
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: briefcase-logs-${{ matrix.platform }}
+          path: logs/*
       - uses: actions/upload-artifact@v4
         with:
           name: refolio-${{ matrix.platform }}
