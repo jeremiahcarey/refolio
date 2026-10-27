@@ -1,6 +1,7 @@
 name: release
 # Builds the desktop installers. Run it by hand, or push a tag like v0.1.0 to attach them to a release.
-# macOS here is unsigned; sign and notarize locally (see README) for the public download.
+# Windows and Linux only. The macOS DMG is signed and notarized locally (see README) and
+# attached to the release by hand.
 on:
   workflow_dispatch:
   push:
@@ -10,7 +11,6 @@ jobs:
     strategy:
       matrix:
         include:
-          - { os: macos-latest, platform: macOS, args: "--adhoc-sign" }
           - { os: windows-latest, platform: windows, args: "" }
           - { os: ubuntu-latest, platform: linux, args: "" }
     runs-on: ${{ matrix.os }}
