@@ -64,6 +64,11 @@ author_email = "jeremiah.a.carey@gmail.com"
 [tool.briefcase.app.refolio]
 formal_name = "Refolio"
 description = "Turn PDFs of papers into clean EPUBs for listening."
+long_description = """\
+Refolio converts PDFs of academic papers into EPUBs that read well aloud.
+Columns come out in order, running heads and page numbers are removed,
+and you choose how footnotes are handled. Everything runs on your computer.
+"""
 icon = "refolio/resources/refolio"
 sources = ["refolio"]
 test_sources = []
