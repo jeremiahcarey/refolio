@@ -90,5 +90,5 @@ requires = ["toga-winforms~=0.5"]
 requires = ["toga-gtk~=0.5"]
 
 [tool.briefcase.app.refolio.linux.system.debian]
-system_requires = ["libgirepository1.0-dev", "libcairo2-dev", "libwebkit2gtk-4.1-dev"]
+system_requires = ["libgirepository-2.0-dev", "libcairo2-dev", "libwebkit2gtk-4.1-dev"]
 system_runtime_requires = ["libwebkit2gtk-4.1-0", "gir1.2-webkit2-4.1"]
